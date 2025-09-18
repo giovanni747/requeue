@@ -20,6 +20,7 @@ import { useState, useEffect } from "react";
 import { createRoom, getUserRooms } from "@/lib/actions";
 import ShinyText from '@/components/ui/ShinyText';
 import SuggestedUsers from '@/components/SuggestedUsers';
+import RecentActivity from '@/components/RecentActivity';
 
 export default function WelcomePage() {
   const { user, isLoaded } = useUser();
@@ -193,30 +194,12 @@ export default function WelcomePage() {
             </div>
           </div>
 
-          {/* Right Section - Suggested Users and Friends */}
+          {/* Right Section - Suggested Users and Recent Activity */}
           <div className="lg:col-span-1 space-y-6">
             {/* Suggested Collaborators */}
             <SuggestedUsers />
 
-            {/* Recent Activity Card */}
-            <div className="bg-card rounded-2xl border p-6 shadow-lg">
-              <h2 className="text-lg font-semibold text-foreground mb-4">Recent Activity</h2>
-              <div className="space-y-3">
-                {[
-                  { action: "Evan created a new room", time: "2 min ago", type: "room" },
-                  { action: "Sarah joined 'Design Team'", time: "5 min ago", type: "join" },
-                  { action: "Mike completed a task", time: "12 min ago", type: "task" }
-                ].map((activity, index) => (
-                  <div key={index} className="flex items-start space-x-3">
-                    <div className="w-2 h-2 rounded-full bg-blue-500 mt-2 flex-shrink-0"></div>
-                    <div className="flex-1">
-                      <p className="text-sm text-foreground">{activity.action}</p>
-                      <p className="text-xs text-muted-foreground">{activity.time}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <RecentActivity />
           </div>
         </div>
       </ClerkLoaded>
