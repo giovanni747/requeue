@@ -85,6 +85,8 @@ export function HeroSection() {
                                     </h1>
                                     <ShinyText 
                                         text="Streamline your group's workflow, stay on top of every task, and make teamwork simple and stress-free with Re:queue." 
+                                        disabled={false} 
+                                        speed={3} 
                                         className="mx-auto mt-8 max-w-2xl text-balance text-lg"
                                     />
                                 </AnimatedGroup>
