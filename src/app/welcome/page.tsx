@@ -17,16 +17,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState, useEffect } from "react";
-import { createRoom, getUserRooms } from "@/lib/actions";
+import { createRoom, getUserRooms, sendEmailInvitation, inviteUsersToRoom } from "@/lib/actions";
 import ShinyText from '@/components/ui/ShinyText';
 import SuggestedUsers from '@/components/SuggestedUsers';
 import RecentActivity from '@/components/RecentActivity';
+import { AutosuggestInput } from '@/components/AutosuggestInput';
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  username: string;
+  image?: string;
+  clerkId: string;
+  isFollowing: boolean;
+}
 
 export default function WelcomePage() {
   const { user, isLoaded } = useUser();
   const [rooms, setRooms] = useState<Array<{id: string, name: string, img: string}>>([]);
   const [roomName, setRoomName] = useState("");
   const [username, setUsername] = useState("");
+  const [selectedInvitees, setSelectedInvitees] = useState<(User | { email: string; type: 'email' })[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHeavyUI, setShowHeavyUI] = useState(false);
 
@@ -56,10 +68,14 @@ export default function WelcomePage() {
   // Defer heavy UI until main thread is idle after Clerk loads
   useEffect(() => {
     if (!isLoaded) return;
-    const schedule = (cb: () => void) =>
-      (window as any).requestIdleCallback ? (window as any).requestIdleCallback(cb) : setTimeout(cb, 0);
-    const cancel = (id: any) =>
-      (window as any).cancelIdleCallback ? (window as any).cancelIdleCallback(id) : clearTimeout(id);
+    const schedule = (cb: () => void): number =>
+      (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback 
+        ? (window as Window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(cb) 
+        : (setTimeout(cb, 0) as unknown) as number;
+    const cancel = (id: number) =>
+      (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback 
+        ? (window as Window & { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(id) 
+        : clearTimeout(id);
     const id = schedule(() => setShowHeavyUI(true));
     return () => cancel(id);
   }, [isLoaded]);
@@ -76,10 +92,72 @@ export default function WelcomePage() {
         setRooms([roomWithImage, ...rooms]);
         setRoomName("");
         setUsername("");
+        setSelectedInvitees([]);
+        
+        // Send invitations to selected users
+        if (selectedInvitees.length > 0) {
+          console.log('Sending invitations to:', selectedInvitees);
+          
+          try {
+            // Separate users and email invites
+            const userInvites = selectedInvitees.filter(invite => 'id' in invite) as User[];
+            const emailInvites = selectedInvitees.filter(invite => 'email' in invite && 'type' in invite) as { email: string; type: 'email' }[];
+            
+            // Invite registered users to room
+            if (userInvites.length > 0) {
+              const userIds = userInvites.map(user => user.id);
+              const userResult = await inviteUsersToRoom(userIds, newRoom.id);
+              if (userResult.success) {
+                console.log(`✅ Invited ${userInvites.length} registered users to room`);
+              } else {
+                console.error('❌ Error inviting users:', userResult.error);
+              }
+            }
+            
+            // Send email invitations
+            if (emailInvites.length > 0) {
+              const emailPromises = emailInvites.map(invite => 
+                sendEmailInvitation(invite.email, newRoom.id)
+              );
+              const emailResults = await Promise.all(emailPromises);
+              
+              const successfulEmails = emailResults.filter(result => result.success);
+              console.log(`✅ Sent ${successfulEmails.length}/${emailInvites.length} email invitations`);
+              
+              // Log any email failures
+              emailResults.forEach((result, index) => {
+                if (!result.success) {
+                  console.error(`❌ Failed to send email to ${emailInvites[index].email}:`, result.error);
+                }
+              });
+            }
+            
+          } catch (error) {
+            console.error('❌ Error sending invitations:', error);
+          }
+        }
       } catch (error) {
         console.error('Error creating room:', error);
       }
     }
+  };
+
+  const handleUserSelect = (user: User | { email: string; type: 'email' }) => {
+    setSelectedInvitees(prev => [...prev, user]);
+  };
+
+  const handleUserRemove = (userToRemove: User | { email: string; type: 'email' }) => {
+    setSelectedInvitees(prev => 
+      prev.filter(user => {
+        if ('id' in user && 'id' in userToRemove) {
+          return user.id !== userToRemove.id;
+        }
+        if ('email' in user && 'email' in userToRemove) {
+          return user.email !== userToRemove.email;
+        }
+        return true;
+      })
+    );
   };
 
   return (
@@ -128,7 +206,7 @@ export default function WelcomePage() {
                       cardDimensions={{ width: 250, height: 200 }}
                       randomRotation={true}
                       sensitivity={150}
-                      sendToBackOnClick={true}
+                      sendToBackOnClick={false}
                       animationConfig={{ stiffness: 260, damping: 20 }}
                     />
                   </div>
@@ -148,15 +226,15 @@ export default function WelcomePage() {
                         </Button>
                       </div>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-[425px]">
+                    <DialogContent className="sm:max-w-[500px]">
                       <DialogHeader>
                         <DialogTitle>Create Room</DialogTitle>
                         <DialogDescription>
-                          Create a new room to start collaborating with your team.
+                          Create a new room and invite your team to start collaborating.
                         </DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-6 py-4">
-                        <div className="grid gap-3 mx-auto w-3/4">
+                        <div className="grid gap-3 mx-auto w-full">
                           <Label htmlFor="name-1" className="mt-2">Room Name</Label>
                           <Input 
                             id="name-1" 
@@ -166,15 +244,23 @@ export default function WelcomePage() {
                             onChange={(e) => setRoomName(e.target.value)}
                           />
                         </div>
-                        <div className="grid gap-3 mx-auto w-3/4">
-                          <Label htmlFor="username-1" className="mt-2">Username</Label>
-                          <Input 
-                            id="username-1" 
-                            name="username" 
-                            placeholder="Your username"
+                        <div className="grid gap-3 mx-auto w-full">
+                          <Label htmlFor="invitees" className="mt-2">
+                            Invite People (Optional)
+                          </Label>
+                          <AutosuggestInput
                             value={username}
-                            onChange={(e) => setUsername(e.target.value)}
+                            onChange={setUsername}
+                            placeholder="Search followers or enter email..."
+                            selectedUsers={selectedInvitees}
+                            onUserSelect={handleUserSelect}
+                            onUserRemove={handleUserRemove}
                           />
+                          {selectedInvitees.length > 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              {selectedInvitees.length} {selectedInvitees.length === 1 ? 'person' : 'people'} will be invited to the room
+                            </p>
+                          )}
                         </div>
                       </div>
                       <DialogFooter>
@@ -183,7 +269,7 @@ export default function WelcomePage() {
                         </DialogClose>
                         <DialogClose asChild>
                           <Button type="submit" onClick={handleCreateRoom}>
-                            Create Room
+                            Create Room {selectedInvitees.length > 0 && `& Invite ${selectedInvitees.length}`}
                           </Button>
                         </DialogClose>
                       </DialogFooter>

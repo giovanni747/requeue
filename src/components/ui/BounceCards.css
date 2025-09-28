@@ -1,0 +1,77 @@
+.bounceCardsContainer {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.sticky-note {
+  position: absolute;
+  width: 140px;
+  aspect-ratio: 1;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  cursor: grab;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.sticky-note:active {
+  cursor: grabbing;
+}
+
+.sticky-note:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transform: translateY(-2px);
+}
+
+.sticky-note-content {
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.sticky-note-title {
+  font-weight: bold;
+  font-size: 11px;
+  margin-bottom: 4px;
+  color: #1f2937;
+  line-height: 1.2;
+}
+
+.sticky-note-description {
+  font-size: 9px;
+  color: #6b7280;
+  flex-grow: 1;
+  margin-bottom: 4px;
+  line-height: 1.2;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.sticky-note-date {
+  font-size: 8px;
+  color: #9ca3af;
+  text-align: right;
+}
+
+.sticky-note-handle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  background-color: #fbbf24;
+  border-radius: 50%;
+  cursor: move;
+}

@@ -34,8 +34,8 @@ export const AnimatedThemeToggler = ({ className }: props) => {
         localStorage.setItem('theme', theme);
         
         // Update user theme in database if available
-        if (typeof window !== 'undefined' && (window as any).updateUserTheme) {
-          (window as any).updateUserTheme(theme);
+        if (typeof window !== 'undefined' && (window as Window & { updateUserTheme?: (theme: string) => void }).updateUserTheme) {
+          ((window as unknown) as Window & { updateUserTheme: (theme: string) => void }).updateUserTheme(theme);
         }
       });
     }).ready;

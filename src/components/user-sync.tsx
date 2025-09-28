@@ -2,7 +2,7 @@
 
 import { useUser } from '@clerk/nextjs';
 import { createUser, updateUserTheme, getUserTheme } from '@/lib/actions';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 export function UserSync() {
   const { user, isLoaded } = useUser();
@@ -44,23 +44,23 @@ export function UserSync() {
   }, [isLoaded, user, hasSynced]);
 
   // Function to update theme in database when user changes it
-  const handleThemeChange = async (theme: 'light' | 'dark') => {
-    if (user) {
+  const handleThemeChange = useCallback(async (theme: string) => {
+    if (user && (theme === 'light' || theme === 'dark')) {
       try {
-        await updateUserTheme(theme);
+        await updateUserTheme(theme as 'light' | 'dark');
       } catch (error) {
         console.error('Error updating user theme:', error);
       }
     }
-  };
+  }, [user]);
 
   // Expose theme change handler for the theme toggler
   useEffect(() => {
-    (window as any).updateUserTheme = handleThemeChange;
+    (window as Window & { updateUserTheme?: (theme: string) => void }).updateUserTheme = handleThemeChange;
     return () => {
-      delete (window as any).updateUserTheme;
+      delete (window as Window & { updateUserTheme?: (theme: string) => void }).updateUserTheme;
     };
-  }, [user]);
+  }, [user, handleThemeChange]);
 
   return null; // This component doesn't render anything
 }

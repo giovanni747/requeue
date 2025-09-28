@@ -29,7 +29,7 @@ export const Particles = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const context = useRef<CanvasRenderingContext2D | null>(null);
-  const circlesRef = useRef<any[]>([]);
+  const circlesRef = useRef<Array<{ x: number; y: number; vx: number; vy: number; radius: number; color: string; alpha: number; }>>([]);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const lastTimeRef = useRef<number>(0);
 
@@ -42,12 +42,14 @@ export const Particles = ({
   }, []);
 
   const drawCircle = useCallback(
-    (x: number, y: number, radius: number, color: string) => {
+    (x: number, y: number, radius: number, color: string, alpha: number) => {
       if (context.current) {
         context.current.beginPath();
         context.current.arc(x, y, radius, 0, 2 * Math.PI);
+        context.current.globalAlpha = alpha;
         context.current.fillStyle = color;
         context.current.fill();
+        context.current.globalAlpha = 1; // Reset alpha
       }
     },
     []
@@ -60,9 +62,9 @@ export const Particles = ({
         y,
         vx,
         vy,
-        radius: Math.random() * size + 0.1,
+        radius: (Math.random() * size + 0.1) * 1.6,
         color: color,
-        alpha: Math.random() * 0.5 + 0.5,
+        alpha: Math.random() * 0.4 + 0.7,
       };
       return circle;
     },
@@ -97,7 +99,7 @@ export const Particles = ({
         canvasRef.current.height
       );
       circlesRef.current.forEach((circle) => {
-        drawCircle(circle.x, circle.y, circle.radius, circle.color);
+        drawCircle(circle.x, circle.y, circle.radius, circle.color, circle.alpha);
       });
     }
   }, [drawCircle]);

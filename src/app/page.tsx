@@ -1,132 +1,294 @@
 "use client";
-import { HeroSection } from "@/components/hero-section";
-import { TestimonialsColumn } from "@/components/testimonial";
-import { motion } from "motion/react";
-import { useUser } from '@clerk/nextjs';
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 
-const testimonials = [
-  {
-    text: "Re:queue transformed our team workflow. Tasks are organized, deadlines are met, and collaboration has never been smoother.",
-    image: "https://randomuser.me/api/portraits/women/1.jpg",
-    name: "Sarah Johnson",
-    role: "Project Manager",
-  },
-  {
-    text: "The intuitive interface made adoption effortless. Our productivity increased significantly within the first week of using Re:queue.",
-    image: "https://randomuser.me/api/portraits/men/2.jpg",
-    name: "Mike Chen",
-    role: "Team Lead",
-  },
-  {
-    text: "Re:queue's real-time updates keep everyone on the same page. No more missed deadlines or confusion about task priorities.",
-    image: "https://randomuser.me/api/portraits/women/3.jpg",
-    name: "Emma Rodriguez",
-    role: "Operations Manager",
-  },
-  {
-    text: "Simple yet powerful. Re:queue eliminated the chaos from our project management and brought clarity to our workflow.",
-    image: "https://randomuser.me/api/portraits/men/4.jpg",
-    name: "David Kim",
-    role: "CEO",
-  },
-  {
-    text: "The collaborative features are outstanding. Team communication and task tracking became seamless with Re:queue.",
-    image: "https://randomuser.me/api/portraits/women/5.jpg",
-    name: "Lisa Thompson",
-    role: "Product Manager",
-  },
-  {
-    text: "Re:queue's streamlined approach to task management helped us deliver projects faster and with better quality.",
-    image: "https://randomuser.me/api/portraits/women/6.jpg",
-    name: "Jessica Lee",
-    role: "Business Analyst",
-  },
-  {
-    text: "Our team coordination improved dramatically. Re:queue makes complex projects feel manageable and organized.",
-    image: "https://randomuser.me/api/portraits/men/7.jpg",
-    name: "Alex Wilson",
-    role: "Marketing Director",
-  },
-  {
-    text: "The clean design and powerful features make Re:queue the perfect solution for modern team collaboration.",
-    image: "https://randomuser.me/api/portraits/women/8.jpg",
-    name: "Rachel Green",
-    role: "Sales Manager",
-  },
-  {
-    text: "Re:queue eliminated workflow bottlenecks and improved our team's efficiency. Highly recommend for any growing business.",
-    image: "https://randomuser.me/api/portraits/men/9.jpg",
-    name: "James Davis",
-    role: "Operations Director",
-  },
-];
+import { ClerkLoaded, ClerkLoading, useUser } from '@clerk/nextjs';
+import { Particles } from "@/components/magicui/particles";
+import Stack from "@/components/Stack";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useState, useEffect } from "react";
+import { createRoom, getUserRooms, sendEmailInvitation, inviteUsersToRoom } from "@/lib/actions";
+import ShinyText from '@/components/ui/ShinyText';
+import SuggestedUsers from '@/components/SuggestedUsers';
+import RecentActivity from '@/components/RecentActivity';
+import { AutosuggestInput } from '@/components/AutosuggestInput';
 
-const firstColumn = testimonials.slice(0, 3);
-const secondColumn = testimonials.slice(3, 6);
-const thirdColumn = testimonials.slice(6, 9);
-
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  username: string;
+  image?: string;
+  clerkId: string;
+  isFollowing: boolean;
+}
 
 export default function Home() {
-  const { isSignedIn, isLoaded } = useUser();
-  const router = useRouter();
+  const { user, isLoaded } = useUser();
+  const [rooms, setRooms] = useState<Array<{id: string, name: string, img: string}>>([]);
+  const [roomName, setRoomName] = useState("");
+  const [username, setUsername] = useState("");
+  const [selectedInvitees, setSelectedInvitees] = useState<(User | { email: string; type: 'email' })[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showHeavyUI, setShowHeavyUI] = useState(false);
 
+  // Fetch user rooms from database
   useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      router.push('/welcome');
+    const fetchRooms = async () => {
+      if (isLoaded && user) {
+        try {
+          const userRooms = await getUserRooms();
+          const roomsWithImages = userRooms.map((room, index) => ({
+            id: room.id,
+            name: room.name,
+            img: room.image_url || `https://images.unsplash.com/photo-157212036061${index + 1}-d971b9d7767c?q=80&w=500&auto=format`
+          }));
+          setRooms(roomsWithImages);
+        } catch (error) {
+          console.error('Error fetching rooms:', error);
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchRooms();
+  }, [isLoaded, user]);
+
+  // Defer heavy UI until main thread is idle after Clerk loads
+  useEffect(() => {
+    if (!isLoaded) return;
+    const schedule = (cb: () => void): number =>
+      (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback 
+        ? (window as Window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(cb) 
+        : (setTimeout(cb, 0) as unknown) as number;
+    const cancel = (id: number) =>
+      (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback 
+        ? (window as Window & { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(id) 
+        : clearTimeout(id);
+    const id = schedule(() => setShowHeavyUI(true));
+    return () => cancel(id);
+  }, [isLoaded]);
+
+  const handleCreateRoom = async () => {
+    if (roomName.trim()) {
+      try {
+        const newRoom = await createRoom(roomName.trim());
+        const roomWithImage = {
+          id: newRoom.id,
+          name: newRoom.name,
+          img: newRoom.image_url || `https://images.unsplash.com/photo-157212036061${rooms.length + 1}-d971b9d7767c?q=80&w=500&auto=format`
+        };
+        setRooms([roomWithImage, ...rooms]);
+        setRoomName("");
+        setUsername("");
+        setSelectedInvitees([]);
+        
+        // Send invitations to selected users
+        if (selectedInvitees.length > 0) {
+          console.log('Sending invitations to:', selectedInvitees);
+          
+          try {
+            // Separate users and email invites
+            const userInvites = selectedInvitees.filter(invite => 'id' in invite) as User[];
+            const emailInvites = selectedInvitees.filter(invite => 'email' in invite && 'type' in invite) as { email: string; type: 'email' }[];
+            
+            // Invite registered users to room
+            if (userInvites.length > 0) {
+              const userIds = userInvites.map(user => user.id);
+              const userResult = await inviteUsersToRoom(userIds, newRoom.id);
+              if (userResult.success) {
+                console.log(`✅ Invited ${userInvites.length} registered users to room`);
+              } else {
+                console.error('❌ Error inviting users:', userResult.error);
+              }
+            }
+            
+            // Send email invitations
+            if (emailInvites.length > 0) {
+              const emailPromises = emailInvites.map(invite => 
+                sendEmailInvitation(invite.email, newRoom.id)
+              );
+              const emailResults = await Promise.all(emailPromises);
+              
+              const successfulEmails = emailResults.filter(result => result.success);
+              console.log(`✅ Sent ${successfulEmails.length}/${emailInvites.length} email invitations`);
+              
+              // Log any email failures
+              emailResults.forEach((result, index) => {
+                if (!result.success) {
+                  console.error(`❌ Failed to send email to ${emailInvites[index].email}:`, result.error);
+                }
+              });
+            }
+            
+          } catch (error) {
+            console.error('❌ Error sending invitations:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Error creating room:', error);
+      }
     }
-  }, [isSignedIn, isLoaded, router]);
-
-  // Show loading state while Clerk is initializing
-  if (!isLoaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-black text-white">
-        <div className="animate-pulse">Loading...</div>
-      </div>
-    );
   }
 
-  // Don't render content if user is signed in (they'll be redirected)
-  if (isSignedIn) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-black text-white">
-        <div className="animate-pulse">Redirecting...</div>
-      </div>
+  const handleUserSelect = (user: User | { email: string; type: 'email' }) => {
+    setSelectedInvitees(prev => [...prev, user]);
+  };
+
+  const handleUserRemove = (userToRemove: User | { email: string; type: 'email' }) => {
+    setSelectedInvitees(prev => 
+      prev.filter(user => {
+        if ('id' in user && 'id' in userToRemove) {
+          return user.id !== userToRemove.id;
+        }
+        if ('email' in user && 'email' in userToRemove) {
+          return user.email !== userToRemove.email;
+        }
+        return true;
+      })
     );
-  }
+  };
 
   return (
-    <div>
-      <HeroSection />
-      <section className="bg-background my-20 relative">
-        <div className="container z-10 mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-          viewport={{ once: true }}
-          className="flex flex-col items-center justify-center max-w-[540px] mx-auto"
-        >
-          <div className="flex justify-center">
-            <div className="border py-1 px-4 rounded-lg">Testimonials</div>
+    <div className="w-full h-full bg-background p-4 sm:p-8">
+      <ClerkLoading>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+        </div>
+      </ClerkLoading>
+      <ClerkLoaded>
+        <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 min-h-[calc(100vh-2rem)]">
+          {/* Left Section - Cards and Particles */}
+          <div className="lg:col-span-2 flex items-start justify-start ">
+            <div className="w-full h-[600px] flex items-center justify-center rounded-3xl shadow-2xl bg-card border relative overflow-hidden">
+              {showHeavyUI && (
+                <Particles 
+                  quantity={100}
+                  staticity={50}
+                  ease={50}
+                  size={0.4}
+                  color="#ffffff"
+                  vx={0}
+                  vy={0}
+                />
+              )}
+              <div className="flex flex-col items-center justify-center space-y-8 p-8 relative z-10">
+                <h1 className="text-sm md:text-4xl font-bold text-foreground text-center mb-8">
+                  {rooms.length > 0 ? <ShinyText 
+                                          text="Your Rooms" 
+                                          disabled={false} 
+                                          speed={3} 
+                                          className="mx-auto max-w-2xl text-balance text-lg"
+                                      /> : <ShinyText 
+                                      text="No Rooms Yet" 
+                                      disabled={false} 
+                                      speed={3} 
+                                      className="mx-auto max-w-2xl text-balance text-lg"
+                                  />}
+                </h1>
+                
+                {/* Stack Component - Centered */}
+                {rooms.length > 0 && showHeavyUI ? (
+                  <div className="flex justify-center">
+                    <Stack
+                      cardsData={rooms}
+                      cardDimensions={{ width: 250, height: 200 }}
+                      randomRotation={true}
+                      sensitivity={150}
+                      sendToBackOnClick={false}
+                      animationConfig={{ stiffness: 260, damping: 20 }}
+                    />
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground">
+                    <p className="text-lg mb-4">Create your first room to get started!</p>
+                  </div>
+                )}
+
+                {/* Create Room Dialog */}
+                <div className="mt-8">
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <div className="relative">
+                        <Button variant="outline" size="lg" className="relative z-10">
+                          Create New Room
+                        </Button>
+                      </div>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[500px]">
+                      <DialogHeader>
+                        <DialogTitle>Create Room</DialogTitle>
+                        <DialogDescription>
+                          Create a new room and invite your team to start collaborating.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-6 py-4">
+                        <div className="grid gap-3 mx-auto w-full">
+                          <Label htmlFor="name-1" className="mt-2">Room Name</Label>
+                          <Input 
+                            id="name-1" 
+                            name="name" 
+                            placeholder="Enter room name" 
+                            value={roomName}
+                            onChange={(e) => setRoomName(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid gap-3 mx-auto w-full">
+                          <Label htmlFor="invitees" className="mt-2">
+                            Invite People (Optional)
+                          </Label>
+                          <AutosuggestInput
+                            value={username}
+                            onChange={setUsername}
+                            placeholder="Search followers or enter email..."
+                            selectedUsers={selectedInvitees}
+                            onUserSelect={handleUserSelect}
+                            onUserRemove={handleUserRemove}
+                          />
+                          {selectedInvitees.length > 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              {selectedInvitees.length} {selectedInvitees.length === 1 ? 'person' : 'people'} will be invited to the room
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <DialogClose asChild>
+                          <Button variant="outline">Cancel</Button>
+                        </DialogClose>
+                        <DialogClose asChild>
+                          <Button type="submit" onClick={handleCreateRoom}>
+                            Create Room {selectedInvitees.length > 0 && `& Invite ${selectedInvitees.length}`}
+                          </Button>
+                        </DialogClose>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl xl:text-5xl font-bold tracking-tighter mt-5">
-            What our users say
-          </h2>
-          <p className="text-center mt-5 opacity-75">
-              See what our customers have to say about us.
-            </p>
-          </motion.div>
+          {/* Right Section - Suggested Users and Recent Activity */}
+          <div className="lg:col-span-1 space-y-6">
+            {/* Suggested Collaborators */}
+            <SuggestedUsers />
 
-          <div className="flex justify-center gap-6 mt-10 [mask-image:linear-gradient(to_bottom,transparent,black_25%,black_75%,transparent)] max-h-[740px] overflow-hidden">
-            <TestimonialsColumn testimonials={firstColumn} duration={15} />
-            <TestimonialsColumn testimonials={secondColumn} className="hidden md:block" duration={19} />
-            <TestimonialsColumn testimonials={thirdColumn} className="hidden lg:block" duration={17} />
+            <RecentActivity />
           </div>
         </div>
-      </section>
+      </ClerkLoaded>
     </div>
   );
 }
