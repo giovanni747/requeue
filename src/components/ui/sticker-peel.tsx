@@ -64,7 +64,7 @@ export function StickerPeel({
     <div
       ref={stickerRef}
       className={cn(
-        "relative bg-gradient-to-br from-yellow-50 via-yellow-100/50 to-yellow-200/30 dark:from-yellow-900/20 dark:via-yellow-800/10 dark:to-yellow-700/5 backdrop-blur-lg border-yellow-300/50 dark:border-yellow-700/30 shadow-lg rounded-lg p-6 border-2",
+        "relative bg-gradient-to-br from-white via-neutral-100/50 to-neutral-200/30 dark:from-neutral-900/20 dark:via-neutral-800/10 dark:to-neutral-700/5 backdrop-blur-lg border-neutral-300/50 dark:border-neutral-700/30 shadow-lg rounded-lg p-6 border-2",
         "transform-gpu",
         className
       )}
@@ -73,9 +73,9 @@ export function StickerPeel({
       }}
     >
       {/* Sticker peel effect */}
-      <div className="absolute top-2 right-2 w-8 h-8 bg-yellow-300/20 dark:bg-yellow-600/20 rounded-full flex items-center justify-center cursor-pointer hover:bg-yellow-400/30 dark:hover:bg-yellow-500/30 transition-colors"
+      <div className="absolute top-2 right-2 w-8 h-8 bg-neutral-300/20 dark:bg-neutral-600/20 rounded-full flex items-center justify-center cursor-pointer hover:bg-neutral-400/30 dark:hover:bg-neutral-500/30 transition-colors"
            onClick={onClose}>
-        <svg className="w-4 h-4 text-yellow-700 dark:text-yellow-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-4 h-4 text-neutral-800 dark:text-neutral-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       </div>

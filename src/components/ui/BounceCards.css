@@ -17,7 +17,11 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   cursor: grab;
   user-select: none;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease;
+  /* Hardware acceleration for smoother animations */
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 .sticky-note:active {
@@ -26,7 +30,7 @@
 
 .sticky-note:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  transform: translateY(-2px);
+  transform: translateZ(0) translateY(-2px);
 }
 
 .sticky-note-content {
@@ -42,13 +46,13 @@
   font-weight: bold;
   font-size: 11px;
   margin-bottom: 4px;
-  color: #1f2937;
+  color: #111827;
   line-height: 1.2;
 }
 
 .sticky-note-description {
   font-size: 9px;
-  color: #6b7280;
+  color: #374151;
   flex-grow: 1;
   margin-bottom: 4px;
   line-height: 1.2;
@@ -61,8 +65,8 @@
 
 .sticky-note-date {
   font-size: 8px;
-  color: #9ca3af;
-  text-align: right;
+  color: #6b7280;
+  text-align: left;
 }
 
 .sticky-note-handle {
@@ -71,7 +75,7 @@
   right: 6px;
   width: 6px;
   height: 6px;
-  background-color: #fbbf24;
+  background-color: #ffffff;
   border-radius: 50%;
   cursor: move;
 }

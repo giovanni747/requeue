@@ -41,7 +41,7 @@ import {
 
 // Import the new component
 import { InviteModal } from '@/components/InviteModal';
-import { getRoomMembers, getRoomData } from '@/lib/actions';
+import { getRoomMembers, getRoomData, getRoomTasks, createTask, updateTaskPosition, assignTaskToUser, deleteTask, getRoomTaskStats } from '@/lib/actions';
 
 export default function RoomPage() {
   const params = useParams();
@@ -84,13 +84,22 @@ export default function RoomPage() {
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [createdTasks, setCreatedTasks] = useState<Array<{
     id: string;
     title: string;
     description: string;
     createdAt: string;
     position: { x: number; y: number };
+    assignedTo?: {
+      id: string;
+      name: string;
+      avatar: string | null;
+    } | null;
   }>>([]);
+
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksError, setTasksError] = useState<string | null>(null);
 
   const roomId = params.id as string;
 
@@ -130,7 +139,7 @@ export default function RoomPage() {
     fetchRoomData();
   }, [isLoaded, user, roomId]);
 
-  // Fetch room members from database
+  // Fetch room members from database and get current user's DB ID
   useEffect(() => {
     const fetchRoomMembers = async () => {
       if (!isLoaded || !user || !roomId) return;
@@ -141,6 +150,12 @@ export default function RoomPage() {
       try {
         const members = await getRoomMembers(roomId);
         setRoomMembers(members);
+        
+        // Find current user's database ID from the members list
+        const currentUserMember = members.find(member => member.clerkId === user.id);
+        if (currentUserMember) {
+          setCurrentUserDbId(currentUserMember.id);
+        }
       } catch (error) {
         console.error('Error fetching room members:', error);
         setMembersError(error instanceof Error ? error.message : 'Failed to load members');
@@ -151,6 +166,48 @@ export default function RoomPage() {
 
     fetchRoomMembers();
   }, [isLoaded, user, roomId]);
+
+  // Fetch room tasks from database
+  useEffect(() => {
+    const fetchRoomTasks = async () => {
+      if (!isLoaded || !user || !roomId) return;
+      
+      setTasksLoading(true);
+      setTasksError(null);
+      
+      try {
+        const tasks = await getRoomTasks(roomId);
+        setCreatedTasks(tasks);
+      } catch (error) {
+        console.error('Error fetching room tasks:', error);
+        setTasksError(error instanceof Error ? error.message : 'Failed to load tasks');
+      } finally {
+        setTasksLoading(false);
+      }
+    };
+
+    fetchRoomTasks();
+  }, [isLoaded, user, roomId]);
+
+  // Fetch task statistics - only on mount and when assignments change
+  useEffect(() => {
+    const fetchTaskStats = async () => {
+      if (!isLoaded || !user || !roomId) return;
+      
+      setTaskStatsLoading(true);
+      
+      try {
+        const stats = await getRoomTaskStats(roomId);
+        setTaskStats(stats);
+      } catch (error) {
+        console.error('Error fetching task stats:', error);
+      } finally {
+        setTaskStatsLoading(false);
+      }
+    };
+
+    fetchTaskStats();
+  }, [isLoaded, user, roomId]); // Only re-fetch on mount, not when tasks change
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -169,47 +226,49 @@ export default function RoomPage() {
     }
   };
 
-  const handleTaskSubmit = (e: React.FormEvent) => {
+  const handleTaskSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!taskTitle.trim()) return;
+    if (!taskTitle.trim() || isCreatingTask) return;
 
-    const newTask = {
-      id: Date.now().toString(),
-      title: taskTitle,
-      description: taskDescription,
-      createdAt: new Date().toISOString(),
-      position: {
-        x: Math.random() * 200 + 20, // Random position between 20-220px from left
-        y: Math.random() * 200 + 20, // Random position between 20-220px from top
-      }
-    };
+    setIsCreatingTask(true);
+    
+    try {
+      const positionX = Math.round(Math.random() * 200 + 20); // Random position between 20-220px from left
+      const positionY = Math.round(Math.random() * 200 + 20); // Random position between 20-220px from top
 
-    setCreatedTasks(prev => [...prev, newTask]);
-    setSubmitted(true);
-    
-    // Add bounce effect to the new task after it's rendered
-    setTimeout(() => {
-      const newCard = document.querySelector(`[data-task-id="${newTask.id}"]`) as HTMLElement;
-      if (newCard) {
-        gsap.fromTo(newCard, 
-          { scale: 0, rotation: 0 },
-          { 
-            scale: 1, 
-            rotation: 0,
-            duration: 0.8,
-            ease: "elastic.out(1, 0.6)"
-          }
-        );
+      // Create task in database
+      const newTask = await createTask(roomId, taskTitle, taskDescription, positionX, positionY);
+      
+      // Add to local state
+      setCreatedTasks(prev => [...prev, {
+        id: newTask.id,
+        title: newTask.title,
+        description: newTask.description,
+        createdAt: newTask.createdAt,
+        position: newTask.position,
+        assignedTo: null
+      }]);
+      
+      setSubmitted(true);
+      
+      // Mark this task as new for animation
+      if (typeof window !== 'undefined') {
+        window.sessionStorage?.setItem(`task-${newTask.id}-animated`, 'false');
       }
-    }, 100);
-    
-    // Reset form after 2 seconds
-    setTimeout(() => {
-      setSubmitted(false);
-      setTaskTitle("");
-      setTaskDescription("");
-      setShowStickerCard(false);
-    }, 2000);
+      
+      // Reset form after 2 seconds
+      setTimeout(() => {
+        setSubmitted(false);
+        setTaskTitle("");
+        setTaskDescription("");
+        setShowStickerCard(false);
+        setIsCreatingTask(false);
+      }, 2000);
+    } catch (error) {
+      console.error('Error creating task:', error);
+      setIsCreatingTask(false);
+      // You could add a toast notification here
+    }
   };
 
   const [draggedTask, setDraggedTask] = useState<string | null>(null);
@@ -219,7 +278,16 @@ export default function RoomPage() {
   const [dragStartTime, setDragStartTime] = useState(0);
   const [hasScaled, setHasScaled] = useState(false);
   const [activeDropZone, setActiveDropZone] = useState(false);
-  const [taskAssignments, setTaskAssignments] = useState<{[taskId: string]: {name: string, avatar: string | null}}>({});
+  const [taskStats, setTaskStats] = useState<Array<{
+    id: string;
+    name: string;
+    avatar: string | null;
+    totalTasks: number;
+    assignedTasks: number;
+    completedTasks: number;
+  }>>([]);
+  const [taskStatsLoading, setTaskStatsLoading] = useState(false);
+  const [currentUserDbId, setCurrentUserDbId] = useState<string | null>(null);
 
   const handleDragStart = (e: React.DragEvent, taskId: string) => {
     e.dataTransfer.setData("text/plain", taskId);
@@ -228,14 +296,18 @@ export default function RoomPage() {
     setDraggedTask(taskId);
     setIsDragging(true);
     
-    // Add visual feedback
+    // Smooth pickup animation with bounce
     const draggedCard = document.querySelector(`[data-task-id="${taskId}"]`) as HTMLElement;
     if (draggedCard) {
+      gsap.killTweensOf(draggedCard);
+      
       gsap.to(draggedCard, {
-        scale: 1.05,
-        rotation: 5,
-        duration: 0.2,
-        ease: "power2.out"
+        scale: 1.1,
+        rotation: 3,
+        y: -8,
+        duration: 0.25,
+        ease: "back.out(1.5)",
+        zIndex: 1000
       });
     }
   };
@@ -243,14 +315,18 @@ export default function RoomPage() {
   const handleDragEnd = (e: React.DragEvent) => {
     const taskId = e.dataTransfer.getData("text/plain");
     
-    // Reset visual feedback
+    // Smooth settle animation with bounce
     const draggedCard = document.querySelector(`[data-task-id="${taskId}"]`) as HTMLElement;
     if (draggedCard) {
+      gsap.killTweensOf(draggedCard);
+      
       gsap.to(draggedCard, {
         scale: 1,
         rotation: 0,
-        duration: 0.3,
-        ease: "elastic.out(1, 0.6)"
+        y: 0,
+        duration: 0.4,
+        ease: "elastic.out(1, 0.6)",
+        zIndex: 20
       });
     }
     
@@ -273,7 +349,7 @@ export default function RoomPage() {
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     const taskId = e.dataTransfer.getData("text/plain");
     
@@ -293,69 +369,175 @@ export default function RoomPage() {
     const constrainedX = Math.max(0, Math.min(newX, maxX));
     const constrainedY = Math.max(0, Math.min(newY, maxY));
     
-    // Update task position
-    setCreatedTasks(prev => prev.map(task => 
-      task.id === taskId 
-        ? { ...task, position: { x: constrainedX, y: constrainedY } }
-        : task
-    ));
+    // Round to integers to avoid decimal precision issues
+    const roundedX = Math.round(constrainedX);
+    const roundedY = Math.round(constrainedY);
+    
+    // Instant position update
+    const draggedCard = document.querySelector(`[data-task-id="${taskId}"]`) as HTMLElement;
+    if (draggedCard) {
+      gsap.to(draggedCard, {
+        left: roundedX,
+        top: roundedY,
+        duration: 0.1,
+        ease: "power1.out"
+      });
+    }
     
     setActiveDropZone(false);
-  };
-
-  const handleTaskDoubleClick = (taskId: string) => {
-    if (!user) return;
     
-    // Assign current user to the task
-    setTaskAssignments(prev => ({
-      ...prev,
-      [taskId]: {
-        name: user.fullName || user.firstName || 'User',
-        avatar: user.imageUrl || null
+    // Update database in background without triggering re-render
+    try {
+      await updateTaskPosition(taskId, roundedX, roundedY);
+      
+      // Silently update state without causing re-render
+      setCreatedTasks(prev => prev.map(task => 
+        task.id === taskId 
+          ? { ...task, position: { x: roundedX, y: roundedY } }
+          : task
+      ));
+    } catch (error) {
+      console.error('Error updating task position:', error);
+      // Revert position on error
+      if (draggedCard) {
+        const originalTask = createdTasks.find(t => t.id === taskId);
+        if (originalTask) {
+          gsap.to(draggedCard, {
+            left: originalTask.position.x,
+            top: originalTask.position.y,
+            duration: 0.3,
+            ease: "power2.out"
+          });
+        }
       }
-    }));
-    
-    // Add visual feedback with GSAP animation
-    const taskCard = document.querySelector(`[data-task-id="${taskId}"]`) as HTMLElement;
-    if (taskCard) {
-      gsap.to(taskCard, {
-        scale: 1.1,
-        duration: 0.2,
-        ease: "power2.out",
-        yoyo: true,
-        repeat: 1
-      });
     }
   };
 
-  // Draggable Task Card Component with Bounce Effect
-  const DraggableTaskCard = ({ task, index }: { task: any; index: number }) => {
+  const handleTaskDoubleClick = async (taskId: string) => {
+    if (!user) return;
+    
+    try {
+      // Assign current user to the task in database
+      const result = await assignTaskToUser(taskId);
+      
+      if (result.success && result.assignedUser) {
+        // Update local state
+        setCreatedTasks(prev => prev.map(task => 
+          task.id === taskId 
+            ? { ...task, assignedTo: result.assignedUser }
+            : task
+        ));
+        
+        // Refresh task stats when assignment changes
+        const stats = await getRoomTaskStats(roomId);
+        setTaskStats(stats);
+        
+        // Quick pulse feedback
+        const taskCard = document.querySelector(`[data-task-id="${taskId}"]`) as HTMLElement;
+        if (taskCard) {
+          gsap.killTweensOf(taskCard);
+          
+          gsap.to(taskCard, {
+            scale: 1.05,
+            duration: 0.08,
+            ease: "power2.out",
+            yoyo: true,
+            repeat: 1,
+            onComplete: () => {
+              gsap.set(taskCard, { scale: 1 });
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error assigning task:', error);
+    }
+  };
+
+  const handleUnassignTask = async (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent double-click event
+    
+    try {
+      // Unassign by passing null as the user ID
+      const result = await assignTaskToUser(taskId, null);
+      
+      if (result.success) {
+        // Update local state
+        setCreatedTasks(prev => prev.map(task => 
+          task.id === taskId 
+            ? { ...task, assignedTo: null }
+            : task
+        ));
+        
+        // Refresh task stats when assignment changes
+        const stats = await getRoomTaskStats(roomId);
+        setTaskStats(stats);
+      }
+    } catch (error) {
+      console.error('Error unassigning task:', error);
+    }
+  };
+
+  // Draggable Task Card Component with Bounce Effect - Memoized to prevent re-renders
+  const DraggableTaskCard = React.memo(({ task, index, currentUserDbId }: { task: any; index: number; currentUserDbId: string | null }) => {
     const isCurrentlyDragging = draggedTask === task.id && isDragging;
     const cardRef = React.useRef<HTMLDivElement>(null);
     const hasAnimated = React.useRef(false);
-    const assignment = taskAssignments[task.id];
+    const dragAnimation = React.useRef<gsap.core.Tween | null>(null);
+    const assignment = task.assignedTo;
+    
+    // Use task ID to ensure animation only runs once per task
+    const animationKey = `task-${task.id}-animated`;
+    const hasRunInitialAnimation = React.useRef(
+      typeof window !== 'undefined' && window.sessionStorage?.getItem(animationKey) === 'true'
+    );
     
     React.useEffect(() => {
-      if (cardRef.current && !hasAnimated.current) {
-        // Initial bounce animation when card appears (only once)
-        gsap.fromTo(cardRef.current, 
-          { scale: 0, opacity: 0 },
-          { 
-            scale: 1, 
-            opacity: 1,
-            duration: 0.6,
-            delay: index * 0.1,
-            ease: "elastic.out(1, 0.8)",
-            onComplete: () => {
-              hasAnimated.current = true;
+      if (cardRef.current && !hasRunInitialAnimation.current && !hasAnimated.current) {
+        // Only animate new tasks, not existing ones
+        const isNewTask = Date.now() - new Date(task.createdAt).getTime() < 5000; // 5 seconds
+        
+        if (isNewTask) {
+          gsap.fromTo(cardRef.current, 
+            { scale: 0, opacity: 0 },
+            { 
+              scale: 1, 
+              opacity: 1,
+              duration: 0.6,
+              delay: index * 0.1,
+              ease: "elastic.out(1, 0.8)",
+              onComplete: () => {
+                hasAnimated.current = true;
+                hasRunInitialAnimation.current = true;
+                if (typeof window !== 'undefined') {
+                  window.sessionStorage?.setItem(animationKey, 'true');
+                }
+              }
             }
-          }
-        );
+          );
+        } else {
+          // For existing tasks, just ensure they're visible
+          gsap.set(cardRef.current, { scale: 1, opacity: 1 });
+          hasAnimated.current = true;
+          hasRunInitialAnimation.current = true;
+        }
       }
-    }, [index]);
+    }, [task.id, index, animationKey]);
+    
+    // Cleanup animations on unmount
+    React.useEffect(() => {
+      return () => {
+        if (cardRef.current) {
+          gsap.killTweensOf(cardRef.current);
+        }
+        if (dragAnimation.current) {
+          dragAnimation.current.kill();
+        }
+      };
+    }, []);
     
     return (
-      <div
+      <motion.div
         ref={cardRef}
         className="sticky-note cursor-grab active:cursor-grabbing"
         data-task-id={task.id}
@@ -364,13 +546,50 @@ export default function RoomPage() {
           left: task.position.x,
           top: task.position.y,
           zIndex: isCurrentlyDragging ? 30 : 20,
-          background: 'linear-gradient(135deg, #fef3c7, #fde68a, #f59e0b)',
+          background: 'linear-gradient(135deg, #ffffff, #f5f5f5, #e5e7eb)',
         }}
-        onDragStart={(e) => handleDragStart(e, task.id)}
-        onDragEnd={handleDragEnd}
+        whileDrag={{
+          scale: 1.1,
+          boxShadow: "0px 10px 30px rgba(0,0,0,0.3)",
+          rotate: 2,
+          transition: {
+            duration: 0.2,
+            ease: "easeOut"
+          }
+        }}
+        dragMomentum={false}
+        dragElastic={0}
+        onDragStart={(e: any) => handleDragStart(e, task.id)}
+        onDragEnd={(e: any) => handleDragEnd(e)}
         onDoubleClick={() => handleTaskDoubleClick(task.id)}
       >
         <div className="sticky-note-content">
+          {/* Unassign button - only show if task is assigned to current user */}
+          {assignment && currentUserDbId && assignment.id === currentUserDbId && (
+            <button
+              onClick={(e) => handleUnassignTask(task.id, e)}
+              className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center transition-all shadow-md z-10 cursor-pointer"
+              style={{ backgroundColor: '#ef4444' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
+              title="Unassign task"
+            >
+              <svg 
+                className="w-3 h-3" 
+                fill="none" 
+                stroke="#ffffff" 
+                strokeWidth="3"
+                viewBox="0 0 24 24"
+              >
+                <path 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  d="M6 18L18 6M6 6l12 12" 
+                />
+              </svg>
+            </button>
+          )}
+          
           <div className="sticky-note-title">
             {task.title}
           </div>
@@ -391,7 +610,7 @@ export default function RoomPage() {
                 <Avatar className="h-6 w-6 border-2 border-white shadow-sm">
                   <AvatarImage src={assignment.avatar || ''} alt={assignment.name} />
                   <AvatarFallback className="text-xs bg-primary text-primary-foreground">
-                    {assignment.name.split(' ').map(n => n[0]).join('')}
+                    {assignment.name.split(' ').map((n: string) => n[0]).join('')}
                   </AvatarFallback>
                 </Avatar>
                 <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
@@ -399,9 +618,21 @@ export default function RoomPage() {
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
     );
-  };
+  }, (prevProps, nextProps) => {
+    // Custom comparison to prevent unnecessary re-renders
+    return (
+      prevProps.task.id === nextProps.task.id &&
+      prevProps.task.position.x === nextProps.task.position.x &&
+      prevProps.task.position.y === nextProps.task.position.y &&
+      prevProps.task.assignedTo?.id === nextProps.task.assignedTo?.id &&
+      prevProps.index === nextProps.index &&
+      prevProps.currentUserDbId === nextProps.currentUserDbId
+    );
+  });
+  
+  DraggableTaskCard.displayName = 'DraggableTaskCard';
 
   if (!isLoaded || roomDataLoading) {
     return (
@@ -487,32 +718,6 @@ export default function RoomPage() {
                 <Settings className="h-4 w-4" />
                 Settings
               </Button>
-              <InviteModal 
-                roomId={roomId}
-                onInviteComplete={async (users, emails) => {
-                  console.log('Invited users:', users);
-                  console.log('Email invites sent:', emails);
-                  
-                  // Refresh both room data and members list
-                  if (users.length > 0) {
-                    try {
-                      const [roomData, members] = await Promise.all([
-                        getRoomData(roomId),
-                        getRoomMembers(roomId)
-                      ]);
-                      setRoomData(roomData);
-                      setRoomMembers(members);
-                    } catch (error) {
-                      console.error('Error refreshing room data:', error);
-                    }
-                  }
-                }}
-              >
-                <Button size="sm" className="flex items-center gap-2">
-                  <Plus className="h-4 w-4" />
-                  Invite
-                </Button>
-              </InviteModal>
             </div>
           </div>
         </div>
@@ -528,15 +733,15 @@ export default function RoomPage() {
                 transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
               >
                 <img 
-                  src={roomData?.img} 
+                  src={roomData?.img || '/img.png'} 
                   alt={roomData?.name}
-                  className="w-20 h-20 rounded-2xl object-cover border-4 border-background shadow-lg"
+                  className="w-20 h-20 rounded-2xl object-contain  dark:border-white/40 bg-white/30 dark:bg-white/50 shadow-lg p-2"
                 />
-                <div className="absolute -bottom-2 -right-2 w-6 h-6 bg-green-500 rounded-full border-2 border-background"></div>
+              <div className="absolute -bottom-2 -right-2 w-6 h-6 bg-green-500 rounded-full border-2 border-background"></div> {/*  add image icon */}
               </motion.div>
               
               <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
+                <div className="flex items-center gap-3 mb-3">
                   <motion.h1 
                     className="text-3xl font-bold text-foreground"
                     initial={{ opacity: 0, x: -20 }}
@@ -547,14 +752,6 @@ export default function RoomPage() {
                   </motion.h1>
                 </div>
                 
-                <motion.p 
-                  className="text-muted-foreground text-lg mb-3"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.4 }}
-                >
-                  {roomData?.description}
-                </motion.p>
                 
                 <motion.div 
                   className="flex items-center gap-6 text-sm text-muted-foreground"
@@ -569,10 +766,6 @@ export default function RoomPage() {
                   <div className="flex items-center gap-1">
                     <Calendar className="h-4 w-4" />
                     Created {roomData?.createdAt}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Shield className="h-4 w-4" />
-                    {roomData?.isPrivate ? 'Private' : 'Public'}
                   </div>
                 </motion.div>
               </div>
@@ -592,7 +785,7 @@ export default function RoomPage() {
               {/* Noise Background Section */}
               <div 
                 className={`bounceCardsContainer relative w-full h-96 rounded-lg overflow-hidden bg-black mb-6 transition-colors duration-200 ${
-                  activeDropZone ? 'bg-neutral-800/50 ring-2 ring-violet-400' : 'bg-black'
+                  activeDropZone ? 'bg-neutral-800/50 ring-2 ring-white' : 'bg-black'
                 }`}
                 style={{ width: '100%', height: '384px' }}
                 onDragOver={handleDragOver}
@@ -606,34 +799,40 @@ export default function RoomPage() {
                 {/* Drop Indicator */}
                 {activeDropZone && (
                   <div className="absolute inset-0 pointer-events-none">
-                    <div className="absolute top-4 left-4 right-4 h-0.5 bg-violet-400 opacity-60 animate-pulse"></div>
-                    <div className="absolute bottom-4 left-4 right-4 h-0.5 bg-violet-400 opacity-60 animate-pulse"></div>
-                    <div className="absolute left-4 top-4 bottom-4 w-0.5 bg-violet-400 opacity-60 animate-pulse"></div>
-                    <div className="absolute right-4 top-4 bottom-4 w-0.5 bg-violet-400 opacity-60 animate-pulse"></div>
+                    <div className="absolute top-4 left-4 right-4 h-0.5 bg-white opacity-70 animate-pulse"></div>
+                    <div className="absolute bottom-4 left-4 right-4 h-0.5 bg-white opacity-70 animate-pulse"></div>
+                    <div className="absolute left-4 top-4 bottom-4 w-0.5 bg-white opacity-70 animate-pulse"></div>
+                    <div className="absolute right-4 top-4 bottom-4 w-0.5 bg-white opacity-70 animate-pulse"></div>
                   </div>
                 )}
 
                 {/* Created Tasks Notes */}
                 {createdTasks.map((task, index) => (
-                  <DraggableTaskCard key={task.id} task={task} index={index} />
+                  <DraggableTaskCard key={task.id} task={task} index={index} currentUserDbId={currentUserDbId} />
                 ))}
 
                 {/* Sticker Peel Card */}
                 {showStickerCard && (
-                  <div className="absolute inset-4 flex items-center justify-center z-30">
+                  <>
+                    {/* Click-away overlay to close */}
+                    <div
+                      className="absolute inset-0 bg-black/30 backdrop-blur-[1px] z-20"
+                      onClick={() => setShowStickerCard(false)}
+                    />
+                    <div className="absolute inset-4 flex items-center justify-center z-30" onClick={(e) => e.stopPropagation()}>
                     <StickerPeel 
                       isVisible={showStickerCard}
                       onClose={() => setShowStickerCard(false)}
                       className="max-w-md w-full"
                     >
                       <div className="space-y-4">
-                        <h3 className="text-center text-xl font-semibold text-yellow-800 dark:text-yellow-200">
+                        <h3 className="text-center text-xl font-semibold text-foreground">
                           📝 New Task
                         </h3>
                         {!submitted ? (
                           <form onSubmit={handleTaskSubmit} className="space-y-4">
                             <div className="space-y-2">
-                              <Label htmlFor="taskTitle" className="text-yellow-700 dark:text-yellow-300">
+                              <Label htmlFor="taskTitle" className="text-foreground">
                                 Task Title
                               </Label>
                               <Input
@@ -643,11 +842,11 @@ export default function RoomPage() {
                                 value={taskTitle}
                                 onChange={(e) => setTaskTitle(e.target.value)}
                                 required
-                                className="bg-yellow-50/50 dark:bg-yellow-900/20 border-yellow-300/50 dark:border-yellow-700/50 focus:ring-yellow-500/50"
+                                className="bg-white/90 dark:bg-white/10 border-white/40 dark:border-white/20 focus-visible:ring-[3px] focus-visible:ring-white/40"
                               />
                             </div>
                             <div className="space-y-2">
-                              <Label htmlFor="taskDescription" className="text-yellow-700 dark:text-yellow-300">
+                              <Label htmlFor="taskDescription" className="text-foreground">
                                 Description
                               </Label>
                               <textarea
@@ -656,11 +855,22 @@ export default function RoomPage() {
                                 rows={3}
                                 value={taskDescription}
                                 onChange={(e) => setTaskDescription(e.target.value)}
-                                className="flex w-full rounded-lg border border-yellow-300/50 dark:border-yellow-700/50 bg-yellow-50/50 dark:bg-yellow-900/20 px-3 py-2 text-sm text-foreground shadow-sm shadow-black/5 transition-shadow placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-yellow-500/50 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                                className="flex w-full rounded-lg border border-white/40 dark:border-white/20 bg-white/90 dark:bg-white/10 px-3 py-2 text-sm text-foreground shadow-sm shadow-black/5 transition-shadow placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                               />
                             </div>
-                            <Button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white">
-                              Create Task
+                            <Button 
+                              type="submit" 
+                              className="w-full bg-white text-black hover:bg-white/90"
+                              disabled={isCreatingTask}
+                            >
+                              {isCreatingTask ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                                  Creating...
+                                </div>
+                              ) : (
+                                'Create Task'
+                              )}
                             </Button>
                           </form>
                         ) : (
@@ -670,7 +880,8 @@ export default function RoomPage() {
                         )}
                       </div>
                     </StickerPeel>
-                  </div>
+                    </div>
+                  </>
                 )}
                 
                 {/* StarBorder Button at bottom */}
@@ -736,10 +947,15 @@ export default function RoomPage() {
                           Try Again
                         </Button>
                       </div>
-                    ) : roomMembers.length === 0 ? (
+                    ) : taskStatsLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                        <span className="ml-2 text-sm text-muted-foreground">Loading task stats...</span>
+                      </div>
+                    ) : taskStats.length === 0 ? (
                       <div className="text-center py-8">
                         <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                        <p className="text-muted-foreground">No members found</p>
+                        <p className="text-muted-foreground">No task statistics available</p>
                       </div>
                     ) : (
                       <Table>
@@ -747,17 +963,16 @@ export default function RoomPage() {
                           <TableRow>
                             <TableHead className="w-[50px]">Avatar</TableHead>
                             <TableHead>Username</TableHead>
-                            <TableHead className="text-center">Task 1</TableHead>
-                            <TableHead className="text-center">Task 2</TableHead>
-                            <TableHead className="text-center">Task 3</TableHead>
-                            <TableHead className="text-center">Task 4</TableHead>
+                            <TableHead className="text-center">Total Tasks</TableHead>
+                            <TableHead className="text-center">Assigned</TableHead>
                             <TableHead className="text-center">Completed</TableHead>
+                            <TableHead className="text-center">Progress</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {roomMembers.map((member, index) => (
+                          {taskStats.map((stat, index) => (
                             <motion.tr
-                              key={member.id}
+                              key={stat.id}
                               initial={{ opacity: 0, y: 20 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: 0.9 + index * 0.1 }}
@@ -765,29 +980,42 @@ export default function RoomPage() {
                             >
                               <TableCell>
                                 <Avatar className="h-8 w-8">
-                                  <AvatarImage src={member.avatar || ''} alt={member.name} />
+                                  <AvatarImage src={stat.avatar || ''} alt={stat.name} />
                                   <AvatarFallback className="text-xs">
-                                    {member.name.split(' ').map(n => n[0]).join('')}
+                                    {stat.name.split(' ').map((n: string) => n[0]).join('')}
                                   </AvatarFallback>
                                 </Avatar>
                               </TableCell>
-                              <TableCell className="font-medium">{member.name}</TableCell>
+                              <TableCell className="font-medium">{stat.name}</TableCell>
                               <TableCell className="text-center">
-                                <div className="w-4 h-4 mx-auto rounded border-2 border-muted-foreground/20"></div>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <div className="w-4 h-4 mx-auto rounded border-2 border-muted-foreground/20"></div>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <div className="w-4 h-4 mx-auto rounded border-2 border-muted-foreground/20"></div>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <div className="w-4 h-4 mx-auto rounded border-2 border-muted-foreground/20"></div>
+                                <Badge variant="outline" className="text-xs">
+                                  {stat.totalTasks}
+                                </Badge>
                               </TableCell>
                               <TableCell className="text-center">
                                 <Badge variant="secondary" className="text-xs">
-                                  0/4
+                                  {stat.assignedTasks}
                                 </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="default" className="text-xs">
+                                  {stat.completedTasks}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <div className="flex items-center justify-center">
+                                  <div className="w-16 bg-muted rounded-full h-2 mr-2">
+                                    <div 
+                                      className="bg-primary h-2 rounded-full transition-all duration-300"
+                                      style={{ 
+                                        width: `${stat.assignedTasks > 0 ? (stat.completedTasks / stat.assignedTasks) * 100 : 0}%` 
+                                      }}
+                                    ></div>
+                                  </div>
+                                  <span className="text-xs text-muted-foreground">
+                                    {stat.assignedTasks > 0 ? Math.round((stat.completedTasks / stat.assignedTasks) * 100) : 0}%
+                                  </span>
+                                </div>
                               </TableCell>
                             </motion.tr>
                           ))}

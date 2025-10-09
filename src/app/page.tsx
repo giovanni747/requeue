@@ -17,11 +17,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState, useEffect } from "react";
+import { useRouter } from 'next/navigation';
 import { createRoom, getUserRooms, sendEmailInvitation, inviteUsersToRoom } from "@/lib/actions";
 import ShinyText from '@/components/ui/ShinyText';
 import SuggestedUsers from '@/components/SuggestedUsers';
 import RecentActivity from '@/components/RecentActivity';
 import { AutosuggestInput } from '@/components/AutosuggestInput';
+import { HeroSection } from '@/components/hero-section';
 
 interface User {
   id: string;
@@ -33,8 +35,10 @@ interface User {
   isFollowing: boolean;
 }
 
+
 export default function Home() {
   const { user, isLoaded } = useUser();
+  const router = useRouter();
   const [rooms, setRooms] = useState<Array<{id: string, name: string, img: string}>>([]);
   const [roomName, setRoomName] = useState("");
   const [username, setUsername] = useState("");
@@ -159,6 +163,19 @@ export default function Home() {
       })
     );
   };
+
+  // Show hero section for unauthenticated users
+  if (!isLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <HeroSection />;
+  }
 
   return (
     <div className="w-full h-full bg-background p-4 sm:p-8">

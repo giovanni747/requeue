@@ -1,68 +1,109 @@
 "use client"
 
-import { TrendingUp } from "lucide-react"
-import { PolarAngleAxis, PolarGrid, Radar, RadarChart } from "recharts"
+import { useState, useEffect } from "react"
+import { getMonthlyTaskAnalytics } from "@/lib/actions"
+import { CheckSquare, Target, Flame } from "lucide-react"
 
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-export const description = "A radar chart with dots"
 
-const chartData = [
-  { month: "January", desktop: 186 },
-  { month: "February", desktop: 305 },
-  { month: "March", desktop: 237 },
-  { month: "April", desktop: 273 },
-  { month: "May", desktop: 209 },
-  { month: "June", desktop: 214 },
-]
+interface TaskAnalytics {
+  completedThisMonth: number;
+  totalCompleted: number;
+  totalAssigned: number;
+  dailyCompletions: Array<{
+    date: string;
+    tasksCompleted: number;
+    totalTasks: number;
+  }>;
+  weeklyCompletions: Array<{
+    week: number;
+    tasksCompleted: number;
+  }>;
+  currentStreak: number;
+  currentMonth: number;
+  currentYear: number;
+}
 
 export default function RecentActivity() {
+  const [analytics, setAnalytics] = useState<TaskAnalytics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchAnalytics = async () => {
+      try {
+        setLoading(true);
+        const analyticsData = await getMonthlyTaskAnalytics();
+        setAnalytics(analyticsData);
+      } catch (err) {
+        console.error('Error fetching analytics:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAnalytics();
+  }, []);
+
+  if (loading) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="items-center">
+          <CardTitle>Recent Activity</CardTitle>
+          <CardDescription>Loading your task data...</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="animate-pulse space-y-4">
+            <div className="h-16 bg-muted rounded"></div>
+            <div className="h-16 bg-muted rounded"></div>
+            <div className="h-16 bg-muted rounded"></div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="w-full">
       <CardHeader className="items-center">
-        <CardTitle>Activity Analytics</CardTitle>
+        <CardTitle>Recent Activity</CardTitle>
         <CardDescription>
-          Room engagement for the last 6 months
+          Your task completion progress this month
         </CardDescription>
       </CardHeader>
-      <CardContent className="pb-0">
-        <div className="w-full h-[250px] flex items-center justify-center">
-          <RadarChart 
-            data={chartData}
-            width={300}
-            height={250}
-            margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
-          >
-            <PolarAngleAxis dataKey="month" />
-            <PolarGrid />
-            <Radar
-              dataKey="desktop"
-              fill="var(--chart-1)"
-              fillOpacity={0.9}
-              stroke="var(--chart-1)"
-              strokeWidth={2}
-              dot={{
-                r: 4,
-                fillOpacity: 1,
-              }}
-            />
-          </RadarChart>
+      <CardContent className="space-y-4">
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 gap-4">
+          <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+            <CheckSquare className="w-5 h-5 text-green-400" />
+            <div>
+              <div className="text-lg font-semibold text-green-400">{analytics?.completedThisMonth || 0}</div>
+              <div className="text-xs text-muted-foreground">Completed This Month</div>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+            <Target className="w-5 h-5 text-blue-400" />
+            <div>
+              <div className="text-lg font-semibold text-blue-400">{analytics?.totalAssigned || 0}</div>
+              <div className="text-xs text-muted-foreground">Total Tasks Assigned</div>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+            <Flame className="w-5 h-5 text-orange-400" />
+            <div>
+              <div className="text-lg font-semibold text-orange-400">{analytics?.currentStreak || 0}</div>
+              <div className="text-xs text-muted-foreground">Day Streak</div>
+            </div>
+          </div>
         </div>
       </CardContent>
-      <CardFooter className="flex-col gap-2 text-sm">
-        <div className="flex items-center gap-2 leading-none font-medium">
-          Trending up by 5.2% this month <TrendingUp className="h-4 w-4" />
-        </div>
-        <div className="text-muted-foreground flex items-center gap-2 leading-none">
-          January - June 2024
-        </div>
-      </CardFooter>
     </Card>
   )
 }

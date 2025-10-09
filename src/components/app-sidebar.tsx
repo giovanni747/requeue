@@ -7,6 +7,9 @@ import {
   Settings,
   Plus,
   Hash,
+  Bell,
+  User,
+  CheckSquare,
 } from "lucide-react"
 import { UserButton } from "@clerk/nextjs"
 import { useEffect, useState } from "react"
@@ -16,9 +19,10 @@ import Link from "next/link"
 
 // App-specific menu items
 const items = [
-  { title: "Home", icon: Home, href: "/", active: true },
-  { title: "Rooms", icon: Users, href: "/", active: false },
-  { title: "Messages", icon: MessageSquare, href: "/", active: false },
+  { title: "Home", icon: Home, href: "/" },
+  { title: "My Tasks", icon: CheckSquare, href: "/my-tasks" },
+  { title: "Notifications", icon: Bell, href: "/notifications" },
+  // { title: "Profile", icon: User, href: "/profile" },
 ]
 
 export function AppSidebar() {
@@ -45,7 +49,8 @@ export function AppSidebar() {
       {/* Navigation */}
       <nav className="flex flex-col items-center py-6 space-y-6">
         {items.map((item) => {
-          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
+          // Only one item can be active at a time
+          const isActive = pathname === item.href
           return (
             <Link
               key={item.title}
