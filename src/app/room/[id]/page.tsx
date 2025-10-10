@@ -42,11 +42,14 @@ import {
 // Import the new component
 import { InviteModal } from '@/components/InviteModal';
 import { getRoomMembers, getRoomData, getRoomTasks, createTask, updateTaskPosition, assignTaskToUser, deleteTask, getRoomTaskStats } from '@/lib/actions';
+import { useSocket } from '@/contexts/SocketContext';
+import toast from 'react-hot-toast';
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const { user, isLoaded } = useUser();
+  const { socket, connected, joinRoom, leaveRoom, emitTaskCreated, emitTaskUpdated, emitTaskMoved, emitTaskCompleted, currentRoomUsers } = useSocket();
   const [roomData, setRoomData] = useState<{ 
     id: string; 
     name: string; 
@@ -102,6 +105,127 @@ export default function RoomPage() {
   const [tasksError, setTasksError] = useState<string | null>(null);
 
   const roomId = params.id as string;
+  const onlineCount = currentRoomUsers?.length || 0;
+
+  // WebSocket event listeners
+  useEffect(() => {
+    if (!socket || !connected || !roomId || !user) return;
+
+    // Join room when component mounts
+    joinRoom(roomId, user.fullName || user.username || 'Anonymous');
+
+    // Listen for real-time task events
+    const handleTaskCreated = (data: any) => {
+      if (data.roomId === roomId) {
+        console.log('🔌 Received task:created event:', data);
+        
+        // Add new task to local state
+        setCreatedTasks(prev => {
+          // Check if task already exists to avoid duplicates
+          if (prev.find(task => task.id === data.task.id)) return prev;
+          return [...prev, {
+            id: data.task.id,
+            title: data.task.title,
+            description: data.task.description,
+            createdAt: data.task.createdAt,
+            position: data.task.position,
+            assignedTo: data.task.assignedTo || null
+          }];
+        });
+
+        // Show toast notification
+        toast.success(`${data.task.createdBy} created a new task: ${data.task.title}`);
+      }
+    };
+
+    const handleTaskUpdated = (data: any) => {
+      if (data.roomId === roomId) {
+        console.log('🔌 Received task:updated event:', data);
+        
+        // Update task in local state
+        setCreatedTasks(prev => prev.map(task => 
+          task.id === data.task.id 
+            ? { ...task, ...data.task }
+            : task
+        ));
+
+        // Show toast notification
+        toast.success(`${data.task.updatedBy} updated task: ${data.task.title}`);
+      }
+    };
+
+    const handleTaskMoved = (data: any) => {
+      if (data.roomId === roomId) {
+        console.log('🔌 Received task:moved event:', data);
+        
+        // Update task position in local state
+        setCreatedTasks(prev => prev.map(task => 
+          task.id === data.taskId 
+            ? { ...task, position: data.newPosition }
+            : task
+        ));
+
+        // Update visual position with a slight delay to ensure DOM is updated
+        setTimeout(() => {
+          const taskCard = document.querySelector(`[data-task-id="${data.taskId}"]`) as HTMLElement;
+          if (taskCard) {
+            gsap.killTweensOf(taskCard);
+            gsap.to(taskCard, {
+              left: data.newPosition.x,
+              top: data.newPosition.y,
+              duration: 0.3,
+              ease: "power2.out"
+            });
+          } else {
+            console.warn(`🔌 Task card not found for ID: ${data.taskId}`);
+          }
+        }, 50);
+      }
+    };
+
+    const handleTaskCompleted = (data: any) => {
+      if (data.roomId === roomId) {
+        console.log('🔌 Received task:completed event:', data);
+        
+        // Remove completed task from local state
+        setCreatedTasks(prev => prev.filter(task => task.id !== data.taskId));
+
+        // Show toast notification
+        toast.success(`${data.completedBy} completed task: ${data.taskTitle}`);
+      }
+    };
+
+    const handleUserJoined = (data: any) => {
+      console.log('🔌 User joined room:', data);
+      toast.success(`${data.userName} joined the room`);
+    };
+
+    const handleUserLeft = (data: any) => {
+      console.log('🔌 User left room:', data);
+      toast(`${data.userName} left the room`);
+    };
+
+    // Register event listeners
+    socket.on('task:created', handleTaskCreated);
+    socket.on('task:updated', handleTaskUpdated);
+    socket.on('task:moved', handleTaskMoved);
+    socket.on('task:completed', handleTaskCompleted);
+    socket.on('user-joined', handleUserJoined);
+    socket.on('user-left', handleUserLeft);
+
+    // Cleanup function
+    return () => {
+      socket.off('task:created', handleTaskCreated);
+      socket.off('task:updated', handleTaskUpdated);
+      socket.off('task:moved', handleTaskMoved);
+      socket.off('task:completed', handleTaskCompleted);
+      socket.off('user-joined', handleUserJoined);
+      socket.off('user-left', handleUserLeft);
+      
+      // Leave room when component unmounts
+      leaveRoom(roomId);
+    };
+  }, [socket, connected, roomId, user, joinRoom, leaveRoom]);
 
   // Mock recent activity
   const mockActivity = [
@@ -166,6 +290,36 @@ export default function RoomPage() {
 
     fetchRoomMembers();
   }, [isLoaded, user, roomId]);
+
+  // Update member online status when socket room user list changes
+  useEffect(() => {
+    if (!currentRoomUsers || currentRoomUsers.length === 0) {
+      console.log('🔌 No current room users yet');
+      return;
+    }
+    if (roomMembers.length === 0) {
+      console.log('🔌 No room members loaded yet');
+      return;
+    }
+    
+    console.log('🔌 Updating member status. Current room users:', currentRoomUsers);
+    console.log('🔌 Room members:', roomMembers.map(m => ({ name: m.name, clerkId: m.clerkId })));
+    console.log('🔌 User ID comparison:', currentRoomUsers.map(u => `Socket userId: ${u.userId}`));
+    console.log('🔌 Member Clerk IDs:', roomMembers.map(m => `DB clerkId: ${m.clerkId}`));
+    
+    setRoomMembers(prev => prev.map(member => {
+      const isOnline = currentRoomUsers.some(u => {
+        const match = u.userId === member.clerkId;
+        console.log(`🔌 Comparing "${u.userId}" === "${member.clerkId}": ${match}`);
+        return match;
+      });
+      console.log(`🔌 ${member.name}: ${member.clerkId} is ${isOnline ? 'online' : 'offline'}`);
+      return {
+        ...member,
+        status: isOnline ? 'online' : 'offline'
+      };
+    }));
+  }, [currentRoomUsers, roomMembers.length]);
 
   // Fetch room tasks from database
   useEffect(() => {
@@ -248,6 +402,13 @@ export default function RoomPage() {
         position: newTask.position,
         assignedTo: null
       }]);
+
+      // Emit WebSocket event for real-time updates
+      emitTaskCreated({
+        roomId,
+        task: newTask,
+        createdBy: user?.fullName || user?.username || 'Anonymous'
+      });
       
       setSubmitted(true);
       
@@ -396,6 +557,14 @@ export default function RoomPage() {
           ? { ...task, position: { x: roundedX, y: roundedY } }
           : task
       ));
+
+      // Emit WebSocket event for real-time updates
+      emitTaskMoved({
+        roomId,
+        taskId,
+        newPosition: { x: roundedX, y: roundedY },
+        movedBy: user?.fullName || user?.username || 'Anonymous'
+      });
     } catch (error) {
       console.error('Error updating task position:', error);
       // Revert position on error
@@ -427,6 +596,16 @@ export default function RoomPage() {
             ? { ...task, assignedTo: result.assignedUser }
             : task
         ));
+        
+        // Emit WebSocket event for real-time updates
+        emitTaskUpdated({
+          roomId,
+          task: {
+            id: taskId,
+            assignedTo: result.assignedUser
+          },
+          updatedBy: user?.fullName || user?.username || 'Anonymous'
+        });
         
         // Refresh task stats when assignment changes
         const stats = await getRoomTaskStats(roomId);
@@ -468,6 +647,16 @@ export default function RoomPage() {
             ? { ...task, assignedTo: null }
             : task
         ));
+        
+        // Emit WebSocket event for real-time updates
+        emitTaskUpdated({
+          roomId,
+          task: {
+            id: taskId,
+            assignedTo: null
+          },
+          updatedBy: user?.fullName || user?.username || 'Anonymous'
+        });
         
         // Refresh task stats when assignment changes
         const stats = await getRoomTaskStats(roomId);
@@ -613,7 +802,7 @@ export default function RoomPage() {
                     {assignment.name.split(' ').map((n: string) => n[0]).join('')}
                   </AvatarFallback>
                 </Avatar>
-                <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                <div className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${currentRoomUsers?.some(u => u.userId === assignment.clerkId) ? 'bg-green-500' : 'bg-transparent'}`}></div>
               </div>
             </div>
           )}
@@ -737,7 +926,7 @@ export default function RoomPage() {
                   alt={roomData?.name}
                   className="w-20 h-20 rounded-2xl object-contain  dark:border-white/40 bg-white/30 dark:bg-white/50 shadow-lg p-2"
                 />
-              <div className="absolute -bottom-2 -right-2 w-6 h-6 bg-green-500 rounded-full border-2 border-background"></div> {/*  add image icon */}
+              <div className={onlineCount > 0 ? "absolute -bottom-2 -right-2 w-6 h-6 bg-green-500 rounded-full border-2 border-background" : "absolute -bottom-2 -right-2 w-6 h-6 bg-transparent rounded-full border-2 border-white/60"}></div>
               </motion.div>
               
               <div className="flex-1">
@@ -761,7 +950,7 @@ export default function RoomPage() {
                 >
                   <div className="flex items-center gap-1">
                     <Users className="h-4 w-4" />
-                    {roomMembers.length} members
+                    {onlineCount} members
                   </div>
                   <div className="flex items-center gap-1">
                     <Calendar className="h-4 w-4" />

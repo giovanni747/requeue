@@ -6,6 +6,7 @@ import { Footer } from "@/components/footer";
 import { AppSidebar } from "@/components/app-sidebar";
 import { UserSync } from "@/components/user-sync";
 import { Toaster } from "react-hot-toast";
+import { SocketProvider } from "@/contexts/SocketContext";
 import {
   ClerkProvider,
   SignInButton,
@@ -68,12 +69,14 @@ export default function RootLayout({
           className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
         >
           <SignedIn>
-            <UserSync />
-            <AppSidebar />
-            {/* Leave space for rounded glass sidebar (width 4rem + 1rem gap) */}
-            <main className="min-h-screen ml-20 pl-4 pr-4">
-              {children}
-            </main>
+            <SocketProvider>
+              <UserSync />
+              <AppSidebar />
+              {/* Leave space for rounded glass sidebar (width 4rem + 1rem gap) */}
+              <main className="min-h-screen ml-20 pl-4 pr-4">
+                {children}
+              </main>
+            </SocketProvider>
           </SignedIn>
           
           <SignedOut>

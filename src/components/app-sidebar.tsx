@@ -16,6 +16,7 @@ import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
+import SocketStatus from "@/components/SocketStatus"
 
 // App-specific menu items
 const items = [
@@ -83,6 +84,11 @@ export function AppSidebar() {
           </div>
         </div>
       )}
+
+      {/* Socket Status */}
+      <div className="absolute bottom-16 left-1/2 -translate-x-1/2">
+        <SocketStatus />
+      </div>
 
       {/* User profile at bottom */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2">

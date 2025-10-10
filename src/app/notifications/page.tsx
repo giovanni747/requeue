@@ -39,6 +39,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import { formatDistanceToNow } from "date-fns";
+import { useSocket } from "@/contexts/SocketContext";
 
 type Notifications = Awaited<ReturnType<typeof getNotifications>>;
 type Notification = Notifications[number];
@@ -190,6 +191,7 @@ const FollowingSkeleton = () => (
 
 export default function NotificationsPage() {
   const router = useRouter();
+  const { socket, connected, emitNotification, emitUserFollowed, emitUserUnfollowed } = useSocket();
   const [notifications, setNotifications] = useState<Notifications>([]);
   const [followers, setFollowers] = useState<Followers>([]);
   const [following, setFollowing] = useState<Following>([]);
@@ -246,6 +248,56 @@ export default function NotificationsPage() {
     
     fetchData();
   }, []);
+
+  // WebSocket event listeners for real-time notifications
+  useEffect(() => {
+    if (!socket || !connected) return;
+
+    const handleNewNotification = (data: any) => {
+      console.log('🔌 Received notification:new event:', data);
+      
+      // Add new notification to local state
+      setNotifications(prev => [data.notification, ...prev]);
+      
+      // Update unread count
+      setUnreadCount(prev => prev + 1);
+      
+      // Show toast notification
+      toast.success(data.notification.message || 'New notification received');
+    };
+
+    const handleUserFollowed = (data: any) => {
+      console.log('🔌 Received user:followed event:', data);
+      
+      // Add to followers list
+      setFollowers(prev => [...prev, data.follower]);
+      
+      // Show toast notification
+      toast.success(`${data.follower.name} started following you`);
+    };
+
+    const handleUserUnfollowed = (data: any) => {
+      console.log('🔌 Received user:unfollowed event:', data);
+      
+      // Remove from followers list
+      setFollowers(prev => prev.filter(follower => follower.id !== data.unfollowerId));
+      
+      // Show toast notification
+      toast(`${data.unfollowerName} stopped following you`);
+    };
+
+    // Register event listeners
+    socket.on('notification:new', handleNewNotification);
+    socket.on('user:followed', handleUserFollowed);
+    socket.on('user:unfollowed', handleUserUnfollowed);
+
+    // Cleanup function
+    return () => {
+      socket.off('notification:new', handleNewNotification);
+      socket.off('user:followed', handleUserFollowed);
+      socket.off('user:unfollowed', handleUserUnfollowed);
+    };
+  }, [socket, connected]);
 
   const handleAcceptInvitation = async (invitationId: string, notificationId: string) => {
     setProcessingInvitation(invitationId);
@@ -310,6 +362,12 @@ export default function NotificationsPage() {
         // Reload followers data from server to get updated status
         const updatedFollowers = await getFollowers();
         setFollowers(updatedFollowers);
+
+        // Emit WebSocket event for real-time updates
+        emitUserFollowed({
+          targetUserId: followerId,
+          follower: { id: followerId, name: 'User' } // Basic follower data
+        });
         
         toast.success('Follow request accepted');
       }
@@ -357,6 +415,13 @@ export default function NotificationsPage() {
         setFollowing(prevFollowing => 
           prevFollowing.filter(user => user.id !== userToUnfollow.id)
         );
+
+        // Emit WebSocket event for real-time updates
+        emitUserUnfollowed({
+          targetUserId: userToUnfollow.id,
+          unfollowerId: userToUnfollow.id, // This would be the current user's ID
+          unfollowerName: userToUnfollow.name || userToUnfollow.username
+        });
         
         toast.success(`Unfollowed ${userToUnfollow.name || userToUnfollow.username}`);
         setUnfollowDialogOpen(false);

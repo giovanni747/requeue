@@ -137,10 +137,8 @@ export async function getUserRooms() {
 // User management actions
 export async function getDbUserId() {
   const { userId: clerkId } = await auth();
-  console.log('getDbUserId - clerkId from auth:', clerkId);
   
   if (!clerkId) {
-    console.log('getDbUserId - No clerkId found');
     return null;
   }
   
@@ -148,7 +146,6 @@ export async function getDbUserId() {
     const [user] = await sql`
       SELECT id FROM users WHERE clerk_id = ${clerkId}
     `;
-    console.log('getDbUserId - Found user in database:', user);
     return user?.id || null;
   } catch (error) {
     console.error('Error getting database user ID:', error);
@@ -159,16 +156,10 @@ export async function getDbUserId() {
 export async function getRandomUsers() {
   try {
     const userId = await getDbUserId();
-    console.log('getRandomUsers - userId:', userId);
     
     if (!userId) {
-      console.log('getRandomUsers - No userId found, returning empty array');
       return [];
     }
-
-    // First, let's check how many total users exist
-    const totalUsers = await sql`SELECT COUNT(*) as count FROM users`;
-    console.log('getRandomUsers - Total users in database:', totalUsers[0]?.count);
 
     // Get 3 random users excluding ourselves and users we already follow
     const randomUsers = await sql`
@@ -184,8 +175,6 @@ export async function getRandomUsers() {
       ORDER BY RANDOM()
       LIMIT 3
     `;
-    
-    console.log('getRandomUsers - Found random users:', randomUsers.length, randomUsers);
     
     return randomUsers.map(user => ({
       id: user.id,
@@ -517,8 +506,8 @@ export async function getRoomMembers(roomId: string) {
       role: member.role,
       joined_at: member.joined_at,
       clerkId: member.clerk_id,
-      // For now, we'll set a default status since we don't have real-time status tracking
-      status: 'online' as 'online' | 'away' | 'offline'
+      // Default to offline; will be updated in UI via WebSocket presence
+      status: 'offline' as 'online' | 'away' | 'offline'
     }));
   } catch (error) {
     console.error('Error fetching room members:', error);
@@ -720,6 +709,7 @@ export async function getRoomTasks(roomId: string) {
         t.actual_hours,
         u_assigned.name as assigned_name,
         u_assigned.image_url as assigned_avatar,
+        u_assigned.clerk_id as assigned_clerk_id,
         u_creator.name as creator_name,
         u_creator.image_url as creator_avatar
       FROM tasks t
@@ -744,7 +734,8 @@ export async function getRoomTasks(roomId: string) {
       assignedTo: task.assigned_to ? {
         id: task.assigned_to,
         name: task.assigned_name,
-        avatar: task.assigned_avatar
+        avatar: task.assigned_avatar,
+        clerkId: task.assigned_clerk_id
       } : null,
       createdBy: {
         id: task.created_by,
@@ -776,17 +767,13 @@ export async function updateTaskPosition(taskId: string, positionX: number, posi
 
     const taskData = task[0];
 
-    // Check if user is the creator, assigned to, or room admin/owner
+    // Check if user is a member of the room (any member can move tasks)
     const userMembership = await sql`
       SELECT role FROM room_members 
       WHERE room_id = ${taskData.room_id} AND user_id = ${userId}
     `;
 
-    const isRoomAdmin = userMembership.length > 0 && ['owner', 'admin'].includes(userMembership[0].role);
-    const isCreator = taskData.created_by === userId;
-    const isAssigned = taskData.assigned_to === userId;
-
-    if (!isCreator && !isAssigned && !isRoomAdmin) {
+    if (userMembership.length === 0) {
       throw new Error('You do not have permission to update this task');
     }
 
