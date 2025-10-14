@@ -197,8 +197,10 @@ export default function NotificationsPage() {
   const [following, setFollowing] = useState<Following>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [processingInvitation, setProcessingInvitation] = useState<string | null>(null);
+  const [processingInvitationAction, setProcessingInvitationAction] = useState<{id: string, action: 'accept' | 'decline'} | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [processingFollowId, setProcessingFollowId] = useState<string | null>(null);
+  const [processingFollowAction, setProcessingFollowAction] = useState<{id: string, action: 'accept' | 'decline'} | null>(null);
   const [unfollowDialogOpen, setUnfollowDialogOpen] = useState(false);
   const [userToUnfollow, setUserToUnfollow] = useState<Following[0] | null>(null);
 
@@ -256,8 +258,15 @@ export default function NotificationsPage() {
     const handleNewNotification = (data: any) => {
       console.log('🔌 Received notification:new event:', data);
       
-      // Add new notification to local state
-      setNotifications(prev => [data.notification, ...prev]);
+      // Add new notification to local state and sort by creation date
+      setNotifications(prev => 
+        [data.notification, ...prev]
+          .sort((a, b) => {
+            const dateA = new Date(a.createdAt);
+            const dateB = new Date(b.createdAt);
+            return dateB.getTime() - dateA.getTime();
+          })
+      );
       
       // Update unread count
       setUnreadCount(prev => prev + 1);
@@ -271,9 +280,6 @@ export default function NotificationsPage() {
       
       // Add to followers list
       setFollowers(prev => [...prev, data.follower]);
-      
-      // Show toast notification
-      toast.success(`${data.follower.name} started following you`);
     };
 
     const handleUserUnfollowed = (data: any) => {
@@ -300,7 +306,7 @@ export default function NotificationsPage() {
   }, [socket, connected]);
 
   const handleAcceptInvitation = async (invitationId: string, notificationId: string) => {
-    setProcessingInvitation(invitationId);
+    setProcessingInvitationAction({id: invitationId, action: 'accept'});
     try {
       const result = await acceptRoomInvitation(invitationId);
       if (result.success) {
@@ -323,12 +329,12 @@ export default function NotificationsPage() {
       console.error("Error accepting invitation:", error);
       toast.error("Failed to accept invitation");
     } finally {
-      setProcessingInvitation(null);
+      setProcessingInvitationAction(null);
     }
   };
 
   const handleDeclineInvitation = async (invitationId: string, notificationId: string) => {
-    setProcessingInvitation(invitationId);
+    setProcessingInvitationAction({id: invitationId, action: 'decline'});
     try {
       const result = await declineRoomInvitation(invitationId);
       if (result.success) {
@@ -346,14 +352,14 @@ export default function NotificationsPage() {
       console.error("Error declining invitation:", error);
       toast.error("Failed to decline invitation");
     } finally {
-      setProcessingInvitation(null);
+      setProcessingInvitationAction(null);
     }
   };
 
   // Handle follow request actions
   const handleAcceptFollower = async (followerId: string) => {
     try {
-      setProcessingFollowId(followerId);
+      setProcessingFollowAction({id: followerId, action: 'accept'});
       
       // Call server action to accept follow request
       const result = await acceptFollowRequest(followerId);
@@ -375,13 +381,13 @@ export default function NotificationsPage() {
       console.error(e);
       toast.error('Failed to accept follow request');
     } finally {
-      setProcessingFollowId(null);
+      setProcessingFollowAction(null);
     }
   };
 
   const handleDeclineFollower = async (followerId: string) => {
     try {
-      setProcessingFollowId(followerId);
+      setProcessingFollowAction({id: followerId, action: 'decline'});
       
       // Call server action to decline follow request
       const result = await declineFollowRequest(followerId);
@@ -397,7 +403,7 @@ export default function NotificationsPage() {
       console.error(e);
       toast.error('Failed to decline follow request');
     } finally {
-      setProcessingFollowId(null);
+      setProcessingFollowAction(null);
     }
   };
 
@@ -525,7 +531,13 @@ export default function NotificationsPage() {
                   ) : (
                     <div className="max-h-[calc(100vh-20rem)] overflow-y-auto">
                       <AnimatedListNotifications delay={200} className="p-4">
-                        {notifications.map((notification, index) => (
+                        {notifications
+                          .sort((a, b) => {
+                            const dateA = new Date(a.createdAt);
+                            const dateB = new Date(b.createdAt);
+                            return dateB.getTime() - dateA.getTime();
+                          })
+                          .map((notification, index) => (
                         <div
                           key={notification.id}
                           className={`group relative flex items-start gap-4 p-4 border-b hover:bg-muted/25 transition-all duration-200 ${
@@ -583,10 +595,10 @@ export default function NotificationsPage() {
                                     notification.invitationId!,
                                     notification.id
                                   )}
-                                  disabled={processingInvitation === notification.invitationId}
+                                  disabled={processingInvitationAction?.id === notification.invitationId}
                                   className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
                                 >
-                                  {processingInvitation === notification.invitationId ? (
+                                  {processingInvitationAction?.id === notification.invitationId && processingInvitationAction?.action === 'accept' ? (
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                   ) : (
                                     <>
@@ -602,10 +614,10 @@ export default function NotificationsPage() {
                                     notification.invitationId!,
                                     notification.id
                                   )}
-                                  disabled={processingInvitation === notification.invitationId}
+                                  disabled={processingInvitationAction?.id === notification.invitationId}
                                   className="hover:bg-destructive hover:text-destructive-foreground"
                                 >
-                                  {processingInvitation === notification.invitationId ? (
+                                  {processingInvitationAction?.id === notification.invitationId && processingInvitationAction?.action === 'decline' ? (
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                   ) : (
                                     <>
@@ -636,10 +648,10 @@ export default function NotificationsPage() {
                                     <Button
                                       size="sm"
                                       onClick={() => handleAcceptFollower(notification.creator.id as any)}
-                                      disabled={processingFollowId === (notification.creator.id as any)}
+                                      disabled={processingFollowAction?.id === (notification.creator.id as any)}
                                       className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
                                     >
-                                      {processingFollowId === (notification.creator.id as any) ? (
+                                      {processingFollowAction?.id === (notification.creator.id as any) && processingFollowAction?.action === 'accept' ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                       ) : (
                                         <>
@@ -652,10 +664,10 @@ export default function NotificationsPage() {
                                       size="sm"
                                       variant="outline"
                                       onClick={() => handleDeclineFollower(notification.creator.id as any)}
-                                      disabled={processingFollowId === (notification.creator.id as any)}
+                                      disabled={processingFollowAction?.id === (notification.creator.id as any)}
                                       className="hover:bg-destructive hover:text-destructive-foreground"
                                     >
-                                      {processingFollowId === (notification.creator.id as any) ? (
+                                      {processingFollowAction?.id === (notification.creator.id as any) && processingFollowAction?.action === 'decline' ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                       ) : (
                                         <>
@@ -701,26 +713,27 @@ export default function NotificationsPage() {
 
             {/* Sidebar - Follow Requests, Followers & Following */}
             <motion.div
-              className="space-y-6"
+              className="space-y-6 h-fit lg:sticky lg:top-6 lg:self-start"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.5, delay: 0.2 }}
+              style={{ maxHeight: 'calc(100vh - 2rem)' }}
             >
               {/* Follow Requests */}
               {pendingFollowers.length > 0 && (
-                <Card className="shadow-lg">
-                  <CardHeader className="border-b">
+                <Card className="shadow-lg flex flex-col">
+                  <CardHeader className="border-b flex-shrink-0">
                     <CardTitle className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-muted-foreground" />
-                      Follow Requests
-                      <Badge variant="secondary">
+                      <Users className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                      <span className="truncate">Follow Requests</span>
+                      <Badge variant="secondary" className="flex-shrink-0">
                         {followers.filter((f: any) => f?.requestStatus === 'pending' || f?.isPending).length}
                       </Badge>
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="p-0 -mt-2">
+                  <CardContent className="p-0 -mt-2 flex-1 overflow-hidden">
                     <AnimatedList
-                      className="w-full -mt-1"
+                      className="w-full -mt-1 max-h-48 overflow-y-auto"
                       showGradients={true}
                       enableArrowNavigation={false}
                       displayScrollbar={true}
@@ -743,15 +756,15 @@ export default function NotificationsPage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Button size="sm" variant="default" disabled={processingFollowId === follower.id} onClick={() => handleAcceptFollower(follower.id)}>
-                              {processingFollowId === follower.id ? (
+                            <Button size="sm" variant="default" disabled={processingFollowAction?.id === follower.id} onClick={() => handleAcceptFollower(follower.id)}>
+                              {processingFollowAction?.id === follower.id && processingFollowAction?.action === 'accept' ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (
                                 <Check className="h-4 w-4" />
                               )}
                             </Button>
-                            <Button size="sm" variant="outline" disabled={processingFollowId === follower.id} onClick={() => handleDeclineFollower(follower.id)}>
-                              {processingFollowId === follower.id ? (
+                            <Button size="sm" variant="outline" disabled={processingFollowAction?.id === follower.id} onClick={() => handleDeclineFollower(follower.id)}>
+                              {processingFollowAction?.id === follower.id && processingFollowAction?.action === 'decline' ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (
                                 <X className="h-4 w-4" />
@@ -765,17 +778,17 @@ export default function NotificationsPage() {
                 </Card>
               )}
               {/* Followers */}
-              <Card className="shadow-lg">
-                <CardHeader className="border-b">
+              <Card className="shadow-lg flex flex-col">
+                <CardHeader className="border-b flex-shrink-0">
                   <CardTitle className="flex items-center gap-2">
-                    <Heart className="h-5 w-5 text-muted-foreground" />
-                    Followers
-                    <Badge variant="secondary">
+                    <Heart className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                    <span className="truncate">Followers</span>
+                    <Badge variant="secondary" className="flex-shrink-0">
                       {followers.length}
                     </Badge>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-0 -mt-2">
+                <CardContent className="p-0 -mt-2 flex-1 overflow-hidden">
                   {isLoading ? (
                     <FollowersSkeleton />
                   ) : followers.length === 0 ? (
@@ -786,7 +799,7 @@ export default function NotificationsPage() {
                     </div>
                   ) : (
                     <AnimatedList
-                      className="w-full -mt-1"
+                      className="w-full -mt-1 max-h-48 overflow-y-auto"
                       showGradients={true}
                       enableArrowNavigation={false}
                       displayScrollbar={true}
@@ -822,17 +835,17 @@ export default function NotificationsPage() {
               </Card>
 
               {/* Following */}
-              <Card className="shadow-lg">
-                <CardHeader className="border-b">
+              <Card className="shadow-lg flex flex-col">
+                <CardHeader className="border-b flex-shrink-0">
                   <CardTitle className="flex items-center gap-2">
-                    <Star className="h-5 w-5 text-muted-foreground" />
-                    Following
-                    <Badge variant="secondary">
+                    <Star className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                    <span className="truncate">Following</span>
+                    <Badge variant="secondary" className="flex-shrink-0">
                       {following.length}
                     </Badge>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-0 -mt-2">
+                <CardContent className="p-0 -mt-2 flex-1 overflow-hidden">
                   {isLoading ? (
                     <FollowingSkeleton />
                   ) : following.length === 0 ? (
@@ -843,7 +856,7 @@ export default function NotificationsPage() {
                     </div>
                   ) : (
                     <AnimatedList
-                      className="w-full -mt-1"
+                      className="w-full -mt-1 max-h-48 overflow-y-auto"
                       showGradients={true}
                       enableArrowNavigation={false}
                       displayScrollbar={true}

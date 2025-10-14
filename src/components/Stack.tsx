@@ -200,7 +200,7 @@ export default function Stack({
                 <h3 className="text-white text-xl font-bold text-center px-4">
                   {card.name || `Room ${card.id}`}
                 </h3>
-                <p className="text-white text-sm opacity-75 mt-2">
+                <p className="text-white text-sm opacity-75 mt-2 text-center">
                   Click to reorder • Double-click to enter
                 </p>
               </div>

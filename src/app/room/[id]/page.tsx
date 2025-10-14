@@ -2,11 +2,26 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useUser } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Status } from '@/components/ui/status';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   Table,
   TableBody,
@@ -18,7 +33,7 @@ import {
 import { Particles } from '@/components/magicui/particles';
 import NoiseBackground from '@/components/ui/noise-background';
 import StarBorder from '@/components/ui/star-border';
-import { StickerPeel } from '@/components/ui/sticker-peel';
+import { MagicCard } from '@/components/ui/magic-card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import React from 'react';
@@ -36,20 +51,23 @@ import {
   Plus,
   Clock,
   Hash,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 
 // Import the new component
 import { InviteModal } from '@/components/InviteModal';
-import { getRoomMembers, getRoomData, getRoomTasks, createTask, updateTaskPosition, assignTaskToUser, deleteTask, getRoomTaskStats } from '@/lib/actions';
+import RoomImageUpload from '@/components/RoomImageUpload';
+import { getRoomMembers, getRoomData, getRoomTasks, createTask, updateTaskPosition, assignTaskToUser, deleteTask, getRoomTaskStats, transferRoomOwnership, promoteMemberToOwner, banUserFromRoom, getBannedUsers, updateRoomImage } from '@/lib/actions';
 import { useSocket } from '@/contexts/SocketContext';
 import toast from 'react-hot-toast';
+import CollaborativeCursors from '@/components/CollaborativeCursor';
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const { user, isLoaded } = useUser();
-  const { socket, connected, joinRoom, leaveRoom, emitTaskCreated, emitTaskUpdated, emitTaskMoved, emitTaskCompleted, currentRoomUsers } = useSocket();
+  const { socket, connected, joinRoom, leaveRoom, emitTaskCreated, emitTaskUpdated, emitTaskMoved, emitTaskCompleted, currentRoomUsers, emitCursorMove } = useSocket();
   const [roomData, setRoomData] = useState<{ 
     id: string; 
     name: string; 
@@ -63,6 +81,8 @@ export default function RoomPage() {
       name: string;
       image: string | null;
     };
+    image_url?: string;
+    image_public_id?: string;
   } | null>(null);
 
   const [roomDataLoading, setRoomDataLoading] = useState(false);
@@ -86,7 +106,6 @@ export default function RoomPage() {
   const [showStickerCard, setShowStickerCard] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
-  const [submitted, setSubmitted] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [createdTasks, setCreatedTasks] = useState<Array<{
     id: string;
@@ -99,6 +118,11 @@ export default function RoomPage() {
       name: string;
       avatar: string | null;
     } | null;
+    createdBy?: {
+      id: string;
+      name: string;
+      avatar: string | null;
+    };
   }>>([]);
 
   const [tasksLoading, setTasksLoading] = useState(false);
@@ -106,6 +130,8 @@ export default function RoomPage() {
 
   const roomId = params.id as string;
   const onlineCount = currentRoomUsers?.length || 0;
+  const processedUserJoins = useRef(new Set<string>());
+  const doubleClickHandled = useRef(false);
 
   // WebSocket event listeners
   useEffect(() => {
@@ -195,9 +221,40 @@ export default function RoomPage() {
       }
     };
 
+    const handleTaskDeleted = (data: any) => {
+      if (data.roomId === roomId) {
+        console.log('🔌 Received task:deleted event:', data);
+        
+        // Remove deleted task from local state
+        setCreatedTasks(prev => prev.filter(task => task.id !== data.taskId));
+
+        // Show toast notification
+        toast(`${data.deletedBy} deleted a task`, {
+          style: {
+            background: "#000000",
+            color: "#ffffff",
+            border: "1px solid #333333",
+          }
+        });
+      }
+    };
+
     const handleUserJoined = (data: any) => {
       console.log('🔌 User joined room:', data);
-      toast.success(`${data.userName} joined the room`);
+      
+      // Create a unique key for this user join event
+      const joinKey = `${data.userId}-${data.socketId}`;
+      
+      // Check if we've already processed this join event
+      if (!processedUserJoins.current.has(joinKey)) {
+        processedUserJoins.current.add(joinKey);
+        toast.success(`${data.userName} joined the room`);
+        
+        // Clean up old entries after a delay to prevent memory leaks
+        setTimeout(() => {
+          processedUserJoins.current.delete(joinKey);
+        }, 5000);
+      }
     };
 
     const handleUserLeft = (data: any) => {
@@ -210,6 +267,7 @@ export default function RoomPage() {
     socket.on('task:updated', handleTaskUpdated);
     socket.on('task:moved', handleTaskMoved);
     socket.on('task:completed', handleTaskCompleted);
+    socket.on('task:deleted', handleTaskDeleted);
     socket.on('user-joined', handleUserJoined);
     socket.on('user-left', handleUserLeft);
 
@@ -219,13 +277,14 @@ export default function RoomPage() {
       socket.off('task:updated', handleTaskUpdated);
       socket.off('task:moved', handleTaskMoved);
       socket.off('task:completed', handleTaskCompleted);
+      socket.off('task:deleted', handleTaskDeleted);
       socket.off('user-joined', handleUserJoined);
       socket.off('user-left', handleUserLeft);
       
       // Leave room when component unmounts
       leaveRoom(roomId);
     };
-  }, [socket, connected, roomId, user, joinRoom, leaveRoom]);
+  }, [socket, connected, roomId, user?.id]);
 
   // Mock recent activity
   const mockActivity = [
@@ -275,10 +334,11 @@ export default function RoomPage() {
         const members = await getRoomMembers(roomId);
         setRoomMembers(members);
         
-        // Find current user's database ID from the members list
+        // Find current user's database ID and role from the members list
         const currentUserMember = members.find(member => member.clerkId === user.id);
         if (currentUserMember) {
           setCurrentUserDbId(currentUserMember.id);
+          setCurrentUserRole(currentUserMember.role);
         }
       } catch (error) {
         console.error('Error fetching room members:', error);
@@ -291,35 +351,31 @@ export default function RoomPage() {
     fetchRoomMembers();
   }, [isLoaded, user, roomId]);
 
-  // Update member online status when socket room user list changes
+  // Track mouse movement for collaborative cursors
   useEffect(() => {
-    if (!currentRoomUsers || currentRoomUsers.length === 0) {
-      console.log('🔌 No current room users yet');
-      return;
-    }
-    if (roomMembers.length === 0) {
-      console.log('🔌 No room members loaded yet');
-      return;
-    }
-    
-    console.log('🔌 Updating member status. Current room users:', currentRoomUsers);
-    console.log('🔌 Room members:', roomMembers.map(m => ({ name: m.name, clerkId: m.clerkId })));
-    console.log('🔌 User ID comparison:', currentRoomUsers.map(u => `Socket userId: ${u.userId}`));
-    console.log('🔌 Member Clerk IDs:', roomMembers.map(m => `DB clerkId: ${m.clerkId}`));
-    
-    setRoomMembers(prev => prev.map(member => {
-      const isOnline = currentRoomUsers.some(u => {
-        const match = u.userId === member.clerkId;
-        console.log(`🔌 Comparing "${u.userId}" === "${member.clerkId}": ${match}`);
-        return match;
+    if (!connected || !roomId || !user) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      emitCursorMove({
+        x: e.clientX,
+        y: e.clientY,
+        userName: user.fullName || user.username || 'Anonymous'
       });
-      console.log(`🔌 ${member.name}: ${member.clerkId} is ${isOnline ? 'online' : 'offline'}`);
-      return {
-        ...member,
-        status: isOnline ? 'online' : 'offline'
-      };
-    }));
-  }, [currentRoomUsers, roomMembers.length]);
+    };
+
+    // Throttle cursor updates (send max 60fps)
+    let lastSent = 0;
+    const throttledMouseMove = (e: MouseEvent) => {
+      const now = Date.now();
+      if (now - lastSent > 16) { // ~60fps
+        handleMouseMove(e);
+        lastSent = now;
+      }
+    };
+
+    document.addEventListener('mousemove', throttledMouseMove);
+    return () => document.removeEventListener('mousemove', throttledMouseMove);
+  }, [connected, roomId, emitCursorMove, user]);
 
   // Fetch room tasks from database
   useEffect(() => {
@@ -363,15 +419,6 @@ export default function RoomPage() {
     fetchTaskStats();
   }, [isLoaded, user, roomId]); // Only re-fetch on mount, not when tasks change
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'online': return 'bg-green-500';
-      case 'away': return 'bg-yellow-500';
-      case 'offline': return 'bg-gray-500';
-      default: return 'bg-gray-500';
-    }
-  };
-
   const getRoleColor = (role: string) => {
     switch (role) {
       case 'Owner': return 'bg-purple-500/10 text-purple-700 border-purple-200';
@@ -386,9 +433,30 @@ export default function RoomPage() {
 
     setIsCreatingTask(true);
     
+    // Create progress toast
+    const toastId = toast.loading('Creating task...', {
+      duration: Infinity,
+      style: {
+        background: "#000000",
+        color: "#ffffff",
+        border: "1px solid #333333",
+      }
+    });
+    
     try {
       const positionX = Math.round(Math.random() * 200 + 20); // Random position between 20-220px from left
       const positionY = Math.round(Math.random() * 200 + 20); // Random position between 20-220px from top
+
+      // Update toast progress
+      toast.loading('Adding task to workspace...', {
+        id: toastId,
+        duration: Infinity,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #333333",
+        }
+      });
 
       // Create task in database
       const newTask = await createTask(roomId, taskTitle, taskDescription, positionX, positionY);
@@ -410,25 +478,43 @@ export default function RoomPage() {
         createdBy: user?.fullName || user?.username || 'Anonymous'
       });
       
-      setSubmitted(true);
+      // Update toast to success
+      toast.success(`✅ Task "${taskTitle}" created successfully!`, {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #333333",
+        }
+      });
       
       // Mark this task as new for animation
       if (typeof window !== 'undefined') {
         window.sessionStorage?.setItem(`task-${newTask.id}-animated`, 'false');
       }
       
-      // Reset form after 2 seconds
-      setTimeout(() => {
-        setSubmitted(false);
-        setTaskTitle("");
-        setTaskDescription("");
-        setShowStickerCard(false);
-        setIsCreatingTask(false);
-      }, 2000);
+      // Reset form immediately
+      setTaskTitle("");
+      setTaskDescription("");
+      setShowStickerCard(false);
+      setIsCreatingTask(false);
+      
     } catch (error) {
       console.error('Error creating task:', error);
+      
+      // Update toast to error
+      toast.error('❌ Failed to create task', {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #dc2626",
+        }
+      });
+      
       setIsCreatingTask(false);
-      // You could add a toast notification here
     }
   };
 
@@ -449,6 +535,26 @@ export default function RoomPage() {
   }>>([]);
   const [taskStatsLoading, setTaskStatsLoading] = useState(false);
   const [currentUserDbId, setCurrentUserDbId] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
+  const [selectedTaskForView, setSelectedTaskForView] = useState<any>(null);
+  const [showDescriptionModal, setShowDescriptionModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  
+  // Ban management state
+  const [showBanDialog, setShowBanDialog] = useState(false);
+  const [userToBan, setUserToBan] = useState<any>(null);
+  const [banReason, setBanReason] = useState('');
+  const [banExpires, setBanExpires] = useState('');
+  const [showBannedUsers, setShowBannedUsers] = useState(false);
+  const [bannedUsers, setBannedUsers] = useState<any[]>([]);
+  
+  // Room image editing state
+  const [newRoomImage, setNewRoomImage] = useState<string | null>(null);
+  const [newRoomImagePublicId, setNewRoomImagePublicId] = useState<string | null>(null);
+  const [isUpdatingImage, setIsUpdatingImage] = useState(false);
+  const [transferringOwnership, setTransferringOwnership] = useState(false);
 
   const handleDragStart = (e: React.DragEvent, taskId: string) => {
     e.dataTransfer.setData("text/plain", taskId);
@@ -458,7 +564,7 @@ export default function RoomPage() {
     setIsDragging(true);
     
     // Smooth pickup animation with bounce
-    const draggedCard = document.querySelector(`[data-task-id="${taskId}"]`) as HTMLElement;
+    const draggedCard = document.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`) as HTMLElement;
     if (draggedCard) {
       gsap.killTweensOf(draggedCard);
       
@@ -477,7 +583,7 @@ export default function RoomPage() {
     const taskId = e.dataTransfer.getData("text/plain");
     
     // Smooth settle animation with bounce
-    const draggedCard = document.querySelector(`[data-task-id="${taskId}"]`) as HTMLElement;
+    const draggedCard = document.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`) as HTMLElement;
     if (draggedCard) {
       gsap.killTweensOf(draggedCard);
       
@@ -667,8 +773,240 @@ export default function RoomPage() {
     }
   };
 
+  const handleDeleteTask = async (taskId: string) => {
+    const toastId = toast.loading('Deleting task...', {
+      duration: Infinity,
+      style: {
+        background: "#000000",
+        color: "#ffffff",
+        border: "1px solid #333333",
+      }
+    });
+    
+    try {
+      await deleteTask(taskId);
+      
+      // Update local state
+      setCreatedTasks(prev => prev.filter(task => task.id !== taskId));
+      
+      // Emit WebSocket event for real-time updates
+      if (socket) {
+        socket.emit('task:deleted', {
+          roomId,
+          taskId,
+          deletedBy: user?.fullName || user?.username || 'Anonymous'
+        });
+      }
+      
+      // Update toast to success
+      toast.success('✅ Task deleted successfully!', {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #333333",
+        }
+      });
+      
+      // Refresh task stats
+      const stats = await getRoomTaskStats(roomId);
+      setTaskStats(stats);
+      
+      // Close confirmation dialog
+      setShowDeleteConfirm(false);
+      setTaskToDelete(null);
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      
+      // Update toast to error
+      toast.error(error instanceof Error ? error.message : '❌ Failed to delete task', {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #dc2626",
+        }
+      });
+      
+      // Close confirmation dialog
+      setShowDeleteConfirm(false);
+      setTaskToDelete(null);
+    }
+  };
+
+  const handleCardClick = (task: any) => {
+    // Add a small delay to distinguish from double-click
+    setTimeout(() => {
+      // Check if this is still the most recent click (not overridden by double-click)
+      if (!doubleClickHandled.current) {
+        setSelectedTaskForView(task);
+        setShowDescriptionModal(true);
+      }
+    }, 200);
+  };
+
+  const [promotingUsers, setPromotingUsers] = useState<Set<string>>(new Set());
+
+  const handleBanUser = (memberId: string, memberName: string) => {
+    setUserToBan({ id: memberId, name: memberName });
+    setShowBanDialog(true);
+  };
+
+  const handleConfirmBan = async () => {
+    if (!userToBan) return;
+
+    const toastId = toast.loading('Banning user...', {
+      duration: Infinity,
+      style: {
+        background: "#000000",
+        color: "#ffffff",
+        border: "1px solid #333333",
+      }
+    });
+
+    try {
+      const result = await banUserFromRoom(roomId, userToBan.id, banReason || undefined, banExpires || undefined);
+
+      if (result.success) {
+        toast.success(`✅ ${userToBan.name} has been banned`, {
+          id: toastId,
+          duration: 3000,
+          style: {
+            background: "#000000",
+            color: "#ffffff",
+            border: "1px solid #333333",
+          }
+        });
+
+        // Refresh room members
+        const members = await getRoomMembers(roomId);
+        setRoomMembers(members);
+
+        setShowBanDialog(false);
+        setUserToBan(null);
+        setBanReason('');
+        setBanExpires('');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '❌ Failed to ban user', {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #dc2626",
+        }
+      });
+    }
+  };
+
+  const handlePromoteToOwner = async (memberId: string, memberName: string) => {
+    setPromotingUsers(prev => new Set([...prev, memberId]));
+    const toastId = toast.loading(`Promoting ${memberName} to owner...`, {
+      duration: Infinity,
+      style: {
+        background: "#000000",
+        color: "#ffffff",
+        border: "1px solid #333333",
+      }
+    });
+
+    try {
+      const result = await promoteMemberToOwner(roomId, memberId);
+      
+      toast.success(`✅ ${memberName} promoted to owner successfully!`, {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #333333",
+        }
+      });
+
+      // Refresh room members to update roles
+      const members = await getRoomMembers(roomId);
+      setRoomMembers(members);
+    } catch (error) {
+      console.error('Error promoting member:', error);
+      toast.error(error instanceof Error ? error.message : '❌ Failed to promote member', {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #dc2626",
+        }
+      });
+    } finally {
+      setPromotingUsers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(memberId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleRoomImageUpload = (url: string, publicId: string) => {
+    setNewRoomImage(url);
+    setNewRoomImagePublicId(publicId);
+  };
+
+  const handleUpdateRoomImage = async () => {
+    if (!newRoomImagePublicId) return;
+
+    setIsUpdatingImage(true);
+    const toastId = toast.loading('Updating room image...', {
+      duration: Infinity,
+      style: {
+        background: "#000000",
+        color: "#ffffff",
+        border: "1px solid #333333",
+      }
+    });
+
+    try {
+      const result = await updateRoomImage(roomId, newRoomImage || undefined, newRoomImagePublicId || undefined);
+
+      toast.success('✅ Room image updated successfully!', {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #333333",
+        }
+      });
+
+      // Update the room data
+      setRoomData(prev => prev ? {
+        ...prev,
+        image_url: newRoomImage || undefined,
+        image_public_id: newRoomImagePublicId || undefined
+      } : null);
+
+      // Reset state
+      setNewRoomImage(null);
+      setNewRoomImagePublicId(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '❌ Failed to update room image', {
+        id: toastId,
+        duration: 3000,
+        style: {
+          background: "#000000",
+          color: "#ffffff",
+          border: "1px solid #dc2626",
+        }
+      });
+    } finally {
+      setIsUpdatingImage(false);
+    }
+  };
+
   // Draggable Task Card Component with Bounce Effect - Memoized to prevent re-renders
-  const DraggableTaskCard = React.memo(({ task, index, currentUserDbId }: { task: any; index: number; currentUserDbId: string | null }) => {
+  const DraggableTaskCard = React.memo(({ task, index, currentUserDbId, currentUserRole }: { task: any; index: number; currentUserDbId: string | null; currentUserRole: string | null }) => {
     const isCurrentlyDragging = draggedTask === task.id && isDragging;
     const cardRef = React.useRef<HTMLDivElement>(null);
     const hasAnimated = React.useRef(false);
@@ -726,37 +1064,55 @@ export default function RoomPage() {
     }, []);
     
     return (
-      <motion.div
-        ref={cardRef}
-        className="sticky-note cursor-grab active:cursor-grabbing"
-        data-task-id={task.id}
-        draggable
-        style={{
-          left: task.position.x,
-          top: task.position.y,
-          zIndex: isCurrentlyDragging ? 30 : 20,
-          background: 'linear-gradient(135deg, #ffffff, #f5f5f5, #e5e7eb)',
-        }}
-        whileDrag={{
-          scale: 1.1,
-          boxShadow: "0px 10px 30px rgba(0,0,0,0.3)",
-          rotate: 2,
-          transition: {
-            duration: 0.2,
-            ease: "easeOut"
-          }
-        }}
-        dragMomentum={false}
-        dragElastic={0}
-        onDragStart={(e: any) => handleDragStart(e, task.id)}
-        onDragEnd={(e: any) => handleDragEnd(e)}
-        onDoubleClick={() => handleTaskDoubleClick(task.id)}
-      >
-        <div className="sticky-note-content">
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <motion.div
+            ref={cardRef}
+            className="sticky-note cursor-pointer"
+            data-task-id={task.id}
+            draggable
+            style={{
+              left: task.position.x,
+              top: task.position.y,
+              zIndex: isCurrentlyDragging ? 30 : 20,
+              background: 'linear-gradient(135deg, #ffffff, #f5f5f5, #e5e7eb)',
+            }}
+            whileDrag={{
+              scale: 1.1,
+              boxShadow: "0px 10px 30px rgba(0,0,0,0.3)",
+              rotate: 2,
+              transition: {
+                duration: 0.2,
+                ease: "easeOut"
+              }
+            }}
+            dragMomentum={false}
+            dragElastic={0}
+            onDragStart={(e: any) => handleDragStart(e, task.id)}
+            onDragEnd={(e: any) => handleDragEnd(e)}
+            onClick={() => handleCardClick(task)}
+            onDoubleClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              doubleClickHandled.current = true;
+              setTimeout(() => {
+                doubleClickHandled.current = false;
+              }, 300);
+              handleTaskDoubleClick(task.id);
+            }}
+          >
+        <div className="sticky-note-content relative h-full">
+          {/* Owner indicator - show delete hint */}
+          {currentUserRole === 'owner' && (
+            <div className="absolute top-1 left-1 w-2 h-2 rounded-full bg-yellow-400 opacity-60" title="Right-click to delete (Owner only)"></div>
+          )}
           {/* Unassign button - only show if task is assigned to current user */}
           {assignment && currentUserDbId && assignment.id === currentUserDbId && (
             <button
-              onClick={(e) => handleUnassignTask(task.id, e)}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleUnassignTask(task.id, e);
+              }}
               className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center transition-all shadow-md z-10 cursor-pointer"
               style={{ backgroundColor: '#ef4444' }}
               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
@@ -779,15 +1135,13 @@ export default function RoomPage() {
             </button>
           )}
           
-          <div className="sticky-note-title">
-            {task.title}
-          </div>
-          {task.description && (
-            <div className="sticky-note-description">
-              {task.description}
+          <div className="flex flex-col items-center justify-center text-center h-full px-4">
+            <div className="sticky-note-title font-bold text-lg">
+              {task.title}
             </div>
-          )}
-          <div className="sticky-note-date">
+          </div>
+          
+          <div className="sticky-note-date absolute bottom-2 left-2 text-xs">
             {new Date(task.createdAt).toLocaleDateString()}
           </div>
           <div className="sticky-note-handle"></div>
@@ -802,12 +1156,31 @@ export default function RoomPage() {
                     {assignment.name.split(' ').map((n: string) => n[0]).join('')}
                   </AvatarFallback>
                 </Avatar>
-                <div className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${currentRoomUsers?.some(u => u.userId === assignment.clerkId) ? 'bg-green-500' : 'bg-transparent'}`}></div>
+                <div className={`absolute bottom-0 right-0 size-2 rounded-full ring-1 ring-zinc-900 ${currentRoomUsers?.some(u => u.userId === assignment.clerkId) ? 'bg-green-500' : 'bg-gray-400'}`}>
+                  {currentRoomUsers?.some(u => u.userId === assignment.clerkId) && (
+                    <div className="absolute inset-0 bg-green-500 rounded-full animate-slow-pulse"></div>
+                  )}
+                </div>
               </div>
             </div>
           )}
         </div>
-      </motion.div>
+          </motion.div>
+        </ContextMenuTrigger>
+        {currentUserRole === 'owner' && (
+          <ContextMenuContent className="w-48">
+            <ContextMenuItem 
+              onClick={() => {
+                setTaskToDelete(task.id);
+                setShowDeleteConfirm(true);
+              }}
+              className="text-red-600"
+            >
+              Delete Task
+            </ContextMenuItem>
+          </ContextMenuContent>
+        )}
+      </ContextMenu>
     );
   }, (prevProps, nextProps) => {
     // Custom comparison to prevent unnecessary re-renders
@@ -817,7 +1190,8 @@ export default function RoomPage() {
       prevProps.task.position.y === nextProps.task.position.y &&
       prevProps.task.assignedTo?.id === nextProps.task.assignedTo?.id &&
       prevProps.index === nextProps.index &&
-      prevProps.currentUserDbId === nextProps.currentUserDbId
+      prevProps.currentUserDbId === nextProps.currentUserDbId &&
+      prevProps.currentUserRole === nextProps.currentUserRole
     );
   });
   
@@ -882,6 +1256,9 @@ export default function RoomPage() {
 
   return (
     <div className="min-h-screen bg-background relative overflow-hidden">
+      {/* Collaborative Cursors */}
+      <CollaborativeCursors />
+      
       {/* Background Particles */}
       <Particles 
         quantity={80}
@@ -903,7 +1280,12 @@ export default function RoomPage() {
         <div className="border-b bg-card/80 backdrop-blur-lg">
           <div className="container mx-auto px-4 py-4 flex items-center justify-end">
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="flex items-center gap-2"
+                onClick={() => setShowSettingsModal(true)}
+              >
                 <Settings className="h-4 w-4" />
                 Settings
               </Button>
@@ -922,11 +1304,10 @@ export default function RoomPage() {
                 transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
               >
                 <img 
-                  src={roomData?.img || '/img.png'} 
+                  src={roomData?.image_url || roomData?.img || '/img.png'} 
                   alt={roomData?.name}
-                  className="w-20 h-20 rounded-2xl object-contain  dark:border-white/40 bg-white/30 dark:bg-white/50 shadow-lg p-2"
+                  className="w-20 h-20 rounded-full object-cover border-2 dark:border-white/40 bg-white/30 dark:bg-white/50 shadow-lg"
                 />
-              <div className={onlineCount > 0 ? "absolute -bottom-2 -right-2 w-6 h-6 bg-green-500 rounded-full border-2 border-background" : "absolute -bottom-2 -right-2 w-6 h-6 bg-transparent rounded-full border-2 border-white/60"}></div>
               </motion.div>
               
               <div className="flex-1">
@@ -943,19 +1324,24 @@ export default function RoomPage() {
                 
                 
                 <motion.div 
-                  className="flex items-center gap-6 text-sm text-muted-foreground"
+                  className="flex items-center gap-3"
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.5 }}
                 >
-                  <div className="flex items-center gap-1">
-                    <Users className="h-4 w-4" />
-                    {onlineCount} members
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Calendar className="h-4 w-4" />
-                    Created {roomData?.createdAt}
-                  </div>
+                  <Status 
+                    variant="online" 
+                    label={`${onlineCount} online`}
+                    showDot={true}
+                    showPing={onlineCount > 0}
+                    size="md"
+                  />
+                  <Status 
+                    variant="offline" 
+                    label={`Created ${roomData?.createdAt}`}
+                    showDot={false}
+                    size="md"
+                  />
                 </motion.div>
               </div>
             </div>
@@ -973,10 +1359,10 @@ export default function RoomPage() {
               
               {/* Noise Background Section */}
               <div 
-                className={`bounceCardsContainer relative w-full h-96 rounded-lg overflow-hidden bg-black mb-6 transition-colors duration-200 ${
+                className={`bounceCardsContainer relative w-full h-[500px] rounded-lg overflow-hidden bg-black mb-6 transition-colors duration-200 ${
                   activeDropZone ? 'bg-neutral-800/50 ring-2 ring-white' : 'bg-black'
                 }`}
-                style={{ width: '100%', height: '384px' }}
+                style={{ width: '100%', height: '500px' }}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
@@ -997,10 +1383,10 @@ export default function RoomPage() {
 
                 {/* Created Tasks Notes */}
                 {createdTasks.map((task, index) => (
-                  <DraggableTaskCard key={task.id} task={task} index={index} currentUserDbId={currentUserDbId} />
+                  <DraggableTaskCard key={task.id} task={task} index={index} currentUserDbId={currentUserDbId} currentUserRole={currentUserRole} />
                 ))}
 
-                {/* Sticker Peel Card */}
+                {/* New Task Dialog */}
                 {showStickerCard && (
                   <>
                     {/* Click-away overlay to close */}
@@ -1009,21 +1395,14 @@ export default function RoomPage() {
                       onClick={() => setShowStickerCard(false)}
                     />
                     <div className="absolute inset-4 flex items-center justify-center z-30" onClick={(e) => e.stopPropagation()}>
-                    <StickerPeel 
-                      isVisible={showStickerCard}
-                      onClose={() => setShowStickerCard(false)}
-                      className="max-w-md w-full"
-                    >
-                      <div className="space-y-4">
-                        <h3 className="text-center text-xl font-semibold text-foreground">
-                          📝 New Task
-                        </h3>
-                        {!submitted ? (
-                          <form onSubmit={handleTaskSubmit} className="space-y-4">
-                            <div className="space-y-2">
-                              <Label htmlFor="taskTitle" className="text-foreground">
-                                Task Title
-                              </Label>
+                      <MagicCard className="max-w-sm w-full rounded-2xl">
+                        <div className="p-6 rounded-2xl">
+                          <h3 className="text-center text-lg font-semibold mb-6">
+                            New Task
+                          </h3>
+                          <form onSubmit={handleTaskSubmit} className="space-y-5">
+                            <div className="space-y-3">
+                              <Label htmlFor="taskTitle" className="text-sm font-medium">Title</Label>
                               <Input
                                 id="taskTitle"
                                 type="text"
@@ -1031,50 +1410,53 @@ export default function RoomPage() {
                                 value={taskTitle}
                                 onChange={(e) => setTaskTitle(e.target.value)}
                                 required
-                                className="bg-white/90 dark:bg-white/10 border-white/40 dark:border-white/20 focus-visible:ring-[3px] focus-visible:ring-white/40"
+                                className="rounded-lg"
                               />
                             </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="taskDescription" className="text-foreground">
-                                Description
-                              </Label>
+                            <div className="space-y-3">
+                              <Label htmlFor="taskDescription" className="text-sm font-medium">Description</Label>
                               <textarea
                                 id="taskDescription"
                                 placeholder="Add task details..."
-                                rows={3}
+                                rows={2}
                                 value={taskDescription}
                                 onChange={(e) => setTaskDescription(e.target.value)}
-                                className="flex w-full rounded-lg border border-white/40 dark:border-white/20 bg-white/90 dark:bg-white/10 px-3 py-2 text-sm text-foreground shadow-sm shadow-black/5 transition-shadow placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                                className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                               />
                             </div>
-                            <Button 
-                              type="submit" 
-                              className="w-full bg-white text-black hover:bg-white/90"
-                              disabled={isCreatingTask}
-                            >
-                              {isCreatingTask ? (
-                                <div className="flex items-center gap-2">
-                                  <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
-                                  Creating...
-                                </div>
-                              ) : (
-                                'Create Task'
-                              )}
-                            </Button>
+                            <div className="flex gap-3 pt-3">
+                              <Button 
+                                type="button"
+                                variant="outline"
+                                onClick={() => setShowStickerCard(false)}
+                                className="flex-1 rounded-lg"
+                              >
+                                Cancel
+                              </Button>
+                              <Button 
+                                type="submit" 
+                                className="flex-1 rounded-lg"
+                                disabled={isCreatingTask}
+                              >
+                                {isCreatingTask ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Creating...
+                                  </>
+                                ) : (
+                                  'Create'
+                                )}
+                              </Button>
+                            </div>
                           </form>
-                        ) : (
-                          <p className="text-center text-green-600 font-medium">
-                            🎉 Task created successfully! It has been added to your workspace.
-                          </p>
-                        )}
-                      </div>
-                    </StickerPeel>
+                        </div>
+                      </MagicCard>
                     </div>
                   </>
                 )}
                 
                 {/* StarBorder Button at bottom */}
-                <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-50">
                     <StarBorder 
                       color="#ffffff" 
                       speed="5s" 
@@ -1276,29 +1658,51 @@ export default function RoomPage() {
                         <p className="text-sm text-muted-foreground">No members found</p>
                       </div>
                     ) : (
-                      roomMembers.map((member, index) => (
-                        <motion.div
-                          key={member.id}
-                          className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors"
-                          initial={{ opacity: 0, x: 20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: 0.8 + index * 0.1 }}
-                        >
-                          <div className="relative">
-                            <Avatar className="h-10 w-10">
-                              <AvatarImage src={member.avatar || ''} alt={member.name} />
-                              <AvatarFallback>{member.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                            </Avatar>
-                            <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-background ${getStatusColor(member.status)}`}></div>
-                          </div>
-                          <div className="flex-1">
-                            <p className="font-medium text-sm">{member.name}</p>
-                            <Badge size="sm" className={getRoleColor(member.role)}>
-                              {member.role}
-                            </Badge>
-                          </div>
-                        </motion.div>
-                      ))
+                      roomMembers.map((member, index) => {
+                        // Check if user is online by looking at currentRoomUsers
+                        const isOnline = currentRoomUsers?.some(u => u.userId === member.clerkId) || false;
+                        
+                        return (
+                          <ContextMenu key={member.id}>
+                            <ContextMenuTrigger asChild>
+                              <motion.div
+                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors cursor-pointer"
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: 0.8 + index * 0.1 }}
+                              >
+                                <div className="relative">
+                                  <Avatar className="h-10 w-10">
+                                    <AvatarImage src={member.avatar || ''} alt={member.name} />
+                                    <AvatarFallback>{member.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
+                                  </Avatar>
+                                  <div className={`absolute bottom-0 right-0 size-3 rounded-full ring-2 ring-zinc-900 ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}>
+                                    {isOnline && (
+                                      <div className="absolute inset-0 bg-green-500 rounded-full animate-slow-pulse"></div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex-1">
+                                  <p className="font-medium text-sm">{member.name}</p>
+                                  <Badge size="sm" className={getRoleColor(member.role)}>
+                                    {member.role}
+                                  </Badge>
+                                </div>
+                              </motion.div>
+                            </ContextMenuTrigger>
+                            {currentUserRole === 'owner' && member.role !== 'owner' && (
+                              <ContextMenuContent className="w-48">
+                                <ContextMenuItem 
+                                  onClick={() => handleBanUser(member.id, member.name)}
+                                  className="text-red-600"
+                                >
+                                  Ban {member.name}
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            )}
+                          </ContextMenu>
+                        );
+                      })
                     )}
                     <InviteModal 
                       roomId={roomId}
@@ -1371,6 +1775,272 @@ export default function RoomPage() {
           </div>
         </div>
       </div>
+
+      {/* Task Description Modal */}
+      <Dialog open={showDescriptionModal} onOpenChange={setShowDescriptionModal}>
+        <DialogContent className="bg-card/95 backdrop-blur-xl border-border/50 max-w-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-center">
+              {selectedTaskForView?.title}
+            </DialogTitle>
+            {selectedTaskForView?.description && (
+              <DialogDescription className="text-center text-lg mt-4 whitespace-pre-wrap">
+                {selectedTaskForView.description}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          <div className="mt-4 space-y-3 px-2">
+            {selectedTaskForView?.createdAt && (
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                <span>Created: {new Date(selectedTaskForView.createdAt).toLocaleString()}</span>
+              </div>
+            )}
+            {selectedTaskForView?.assignedTo && (
+              <div className="flex items-center justify-center gap-2">
+                <span className="text-sm text-muted-foreground">Assigned to:</span>
+                <div className="flex items-center gap-2">
+                  <Avatar className="h-6 w-6">
+                    <AvatarImage src={selectedTaskForView.assignedTo.avatar || ''} />
+                    <AvatarFallback>{selectedTaskForView.assignedTo.name.split(' ').map((n: string) => n[0]).join('')}</AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm font-medium">{selectedTaskForView.assignedTo.name}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="bg-card/95 backdrop-blur-lg border-border/50">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-red-500" />
+              Delete Task?
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this task? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteConfirm(false);
+                setTaskToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (taskToDelete) {
+                  handleDeleteTask(taskToDelete);
+                }
+              }}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Ban User Dialog */}
+      <Dialog open={showBanDialog} onOpenChange={setShowBanDialog}>
+        <DialogContent className="bg-card/95 backdrop-blur-xl border-border/50 max-w-md p-6">
+          <DialogHeader className="pb-4">
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5 text-red-500" />
+              Ban User
+            </DialogTitle>
+            <DialogDescription>
+              Ban {userToBan?.name} from this room. They will lose access immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 px-2">
+            <div className="space-y-2">
+              <Label htmlFor="banReason">Reason (Optional)</Label>
+              <Input
+                id="banReason"
+                value={banReason}
+                onChange={(e) => setBanReason(e.target.value)}
+                placeholder="Why is this user being banned?"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="banExpires">Expires (Optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="banExpires"
+                  type="datetime-local"
+                  value={banExpires}
+                  onChange={(e) => setBanExpires(e.target.value)}
+                  className="flex-1"
+                />
+                {banExpires && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBanExpires('')}
+                    className="px-3"
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave empty for permanent ban
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-3 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowBanDialog(false);
+                setUserToBan(null);
+                setBanReason('');
+                setBanExpires('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmBan}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              Ban User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Settings Modal */}
+      <Dialog open={showSettingsModal} onOpenChange={setShowSettingsModal}>
+        <DialogContent className="bg-card/95 backdrop-blur-xl border-border/50 max-w-3xl max-h-[80vh] overflow-y-auto p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Room Settings
+            </DialogTitle>
+            <DialogDescription>
+              Manage room settings and permissions
+            </DialogDescription>
+          </DialogHeader>
+
+          {currentUserRole === 'owner' && (
+            <div className="mt-6 space-y-6 px-2">
+              {/* Room Image Section */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold">Room Image</h3>
+                <p className="text-sm text-muted-foreground">
+                  Upload or change the room's cover image.
+                </p>
+                
+                <RoomImageUpload
+                  onUploadComplete={handleRoomImageUpload}
+                  currentImage={roomData?.image_url}
+                  currentImagePublicId={roomData?.image_public_id}
+                />
+
+                {newRoomImagePublicId && (
+                  <div className="flex gap-3">
+                    <Button
+                      onClick={handleUpdateRoomImage}
+                      disabled={isUpdatingImage}
+                      className="flex-1"
+                    >
+                      {isUpdatingImage ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        'Update Room Image'
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setNewRoomImage(null);
+                        setNewRoomImagePublicId(null);
+                      }}
+                      disabled={isUpdatingImage}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t pt-6">
+                <h3 className="text-lg font-semibold">Promote to Owner</h3>
+                <p className="text-sm text-muted-foreground">
+                  Promote members to owners. Multiple owners can manage this room.
+                </p>
+                
+                <div className="space-y-3 mt-4">
+                {roomMembers
+                  .filter(member => member.clerkId !== user?.id)
+                  .map((member) => (
+                    <div 
+                      key={member.id} 
+                      className="flex items-center justify-between p-4 mx-2 rounded-lg border bg-card/50 hover:bg-card/80 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={member.avatar || ''} alt={member.name} />
+                          <AvatarFallback>{member.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-medium">{member.name}</p>
+                          <p className="text-sm text-muted-foreground">{member.email}</p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mr-2"
+                        onClick={() => {
+                          if (member.role === 'owner') {
+                            return; // Already an owner, no action needed
+                          }
+                          if (confirm(`Are you sure you want to promote ${member.name} to owner?`)) {
+                            handlePromoteToOwner(member.id, member.name);
+                          }
+                        }}
+                        disabled={promotingUsers.has(member.id) || member.role === 'owner'}
+                      >
+                        {promotingUsers.has(member.id) ? 'Promoting...' : member.role === 'owner' ? 'Owner' : 'Make Owner'}
+                      </Button>
+                    </div>
+                  ))}
+                
+                {roomMembers.filter(m => m.clerkId !== user?.id).length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    No other members to promote.
+                  </p>
+                )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {currentUserRole !== 'owner' && (
+            <div className="mt-6 text-center py-8">
+              <Shield className="h-12 w-12 mx-auto mb-3 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Only the room owner can access settings.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

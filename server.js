@@ -28,6 +28,8 @@ app.prepare().then(() => {
   const roomUsers = new Map();
   // Store global online users keyed by socket.id
   const onlineUsers = new Map();
+  // Store cursor positions by room
+  const roomCursors = new Map(); // roomId -> Map<socketId, cursorData>
 
   // Handle socket.io connections
   io.on("connection", (socket) => {
@@ -141,8 +143,26 @@ app.prepare().then(() => {
 
     // Handle cursor/pointer events for collaborative features
     socket.on("cursor:move", (data) => {
-      socket.to(data.roomId).emit("cursor:move", {
-        ...data,
+      const { roomId, x, y, userName } = data;
+      
+      // Store cursor position
+      if (!roomCursors.has(roomId)) {
+        roomCursors.set(roomId, new Map());
+      }
+      
+      roomCursors.get(roomId).set(socket.id, {
+        x,
+        y,
+        userName,
+        socketId: socket.id,
+        lastSeen: Date.now()
+      });
+      
+      // Broadcast to other users in the room
+      socket.to(roomId).emit("cursor:move", {
+        x,
+        y,
+        userName,
         socketId: socket.id
       });
     });
@@ -167,6 +187,14 @@ app.prepare().then(() => {
           // Emit updated room users list
           const currentUsers = Array.from(users.values());
           io.to(roomId).emit("room-users", currentUsers);
+        }
+      }
+
+      // Clean up cursors from all rooms
+      for (const [roomId, cursors] of roomCursors.entries()) {
+        if (cursors.has(socket.id)) {
+          cursors.delete(socket.id);
+          socket.to(roomId).emit("cursor:leave", { socketId: socket.id });
         }
       }
 

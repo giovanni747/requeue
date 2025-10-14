@@ -54,45 +54,27 @@ export async function getUserTheme() {
 }
 
 // Room actions
-export async function createRoom(name: string, description?: string, imageUrl?: string) {
-  const { userId } = await auth();
-  if (!userId) throw new Error('Unauthorized');
-
+export async function createRoom(name: string, imageUrl?: string, imagePublicId?: string) {
   try {
-    // Ensure user exists
-    await createUser(userId, '', '', '');
-    
-    // Get the user's database ID
-    const [user] = await sql`
-      SELECT id FROM users WHERE clerk_id = ${userId}
-    `;
-    
-    if (!user) {
-      throw new Error('User not found in database');
-    }
+    const userId = await getDbUserId();
+    if (!userId) throw new Error('Unauthorized');
 
-    // Create room with proper foreign key
+    // Create the room
     const result = await sql`
-      INSERT INTO rooms (title, description, image_url, created_by, visibility)
-      VALUES (${name}, ${description}, ${imageUrl}, ${user.id}, 'private')
-      RETURNING id, title, description, image_url, created_at, visibility
+      INSERT INTO rooms (title, created_by, image_url, image_public_id, visibility, status, member_count)
+      VALUES (${name}, ${userId}, ${imageUrl || null}, ${imagePublicId || null}, 'private', 'active', 1)
+      RETURNING id, title as name, image_url, created_at
     `;
-    
+
     const room = result[0];
-    
-    // Add user as owner (member_count will be updated by trigger)
+
+    // Add the creator as a room member with owner role
     await sql`
       INSERT INTO room_members (room_id, user_id, role)
-      VALUES (${room.id}, ${user.id}, 'owner')
+      VALUES (${room.id}, ${userId}, 'owner')
     `;
-    
-    return {
-      id: room.id,
-      name: room.title,
-      description: room.description,
-      image_url: room.image_url,
-      created_at: room.created_at
-    };
+
+    return room;
   } catch (error) {
     console.error('Error creating room:', error);
     throw error;
@@ -100,37 +82,54 @@ export async function createRoom(name: string, description?: string, imageUrl?: 
 }
 
 export async function getUserRooms() {
-  const { userId } = await auth();
-  if (!userId) return [];
-
   try {
-    // Get the user's database ID
-    const [user] = await sql`
-      SELECT id FROM users WHERE clerk_id = ${userId}
-    `;
-    
-    if (!user) {
-      return []; // User not found, return empty array
-    }
+    const userId = await getDbUserId();
+    if (!userId) throw new Error('Unauthorized');
 
-    // Return all rooms where the user is a member (including ones created by others)
     const result = await sql`
-      SELECT r.id, r.title, r.description, r.image_url, r.created_at, r.status, r.member_count
+      SELECT r.id, r.title as name, r.image_url, r.image_public_id, r.created_at
       FROM rooms r
-      INNER JOIN room_members rm ON rm.room_id = r.id
-      WHERE rm.user_id = ${user.id}
+      JOIN room_members rm ON r.id = rm.room_id
+      WHERE rm.user_id = ${userId}
       ORDER BY r.created_at DESC
     `;
-    return result.map(room => ({
-      id: room.id,
-      name: room.title, // Map title back to name for our app
-      description: room.description,
-      image_url: room.image_url,
-      created_at: room.created_at
-    }));
+
+    return result;
   } catch (error) {
-    console.error('Error getting user rooms:', error);
-    return [];
+    console.error('Error fetching user rooms:', error);
+    throw error;
+  }
+}
+
+export async function updateRoomImage(roomId: string, imageUrl?: string, imagePublicId?: string) {
+  try {
+    const userId = await getDbUserId();
+    if (!userId) throw new Error('Unauthorized');
+
+    // Check if user is owner of the room
+    const ownershipCheck = await sql`
+      SELECT created_by FROM rooms WHERE id = ${roomId}
+    `;
+
+    if (ownershipCheck.length === 0) {
+      throw new Error('Room not found');
+    }
+
+    if (ownershipCheck[0].created_by !== userId) {
+      throw new Error('Only room owners can update room images');
+    }
+
+    const result = await sql`
+      UPDATE rooms 
+      SET image_url = ${imageUrl || null}, image_public_id = ${imagePublicId || null}
+      WHERE id = ${roomId}
+      RETURNING id, title as name, image_url, image_public_id
+    `;
+
+    return result[0];
+  } catch (error) {
+    console.error('Error updating room image:', error);
+    throw error;
   }
 }
 
@@ -602,13 +601,82 @@ export async function promoteMemberToOwner(roomId: string, memberId: string) {
     // Promote the member to owner
     await sql`
       UPDATE room_members 
-      SET role = 'owner', updated_at = NOW()
+      SET role = 'owner'
       WHERE room_id = ${roomId} AND user_id = ${memberId}
     `;
 
     return { success: true, message: 'Member successfully promoted to owner' };
   } catch (error) {
     console.error('Error promoting member to owner:', error);
+    throw error;
+  }
+}
+
+// Ban user from room
+export async function banUserFromRoom(roomId: string, targetUserId: string, reason?: string, expiresAt?: string) {
+  try {
+    const userId = await getDbUserId();
+    if (!userId) throw new Error('Unauthorized');
+
+    // Check if user is an owner of the room
+    const userMembership = await sql`
+      SELECT role FROM room_members 
+      WHERE room_id = ${roomId} AND user_id = ${userId}
+    `;
+
+    if (userMembership.length === 0 || userMembership[0].role !== 'owner') {
+      throw new Error('Only room owners can ban users');
+    }
+
+    // Check if target user is a member
+    const targetMembership = await sql`
+      SELECT role FROM room_members 
+      WHERE room_id = ${roomId} AND user_id = ${targetUserId}
+    `;
+
+    if (targetMembership.length === 0) {
+      throw new Error('User is not a member of this room');
+    }
+
+    // Prevent banning other owners
+    if (targetMembership[0].role === 'owner') {
+      throw new Error('Cannot ban other room owners');
+    }
+
+    // Remove user from room members
+    await sql`
+      DELETE FROM room_members 
+      WHERE room_id = ${roomId} AND user_id = ${targetUserId}
+    `;
+
+    return { success: true, message: 'User banned successfully' };
+  } catch (error) {
+    console.error('Error banning user:', error);
+    throw error;
+  }
+}
+
+// Get banned users for a room
+export async function getBannedUsers(roomId: string) {
+  try {
+    const userId = await getDbUserId();
+    if (!userId) throw new Error('Unauthorized');
+
+    // Check if user is an owner of the room
+    const userMembership = await sql`
+      SELECT role FROM room_members 
+      WHERE room_id = ${roomId} AND user_id = ${userId}
+    `;
+
+    if (userMembership.length === 0 || userMembership[0].role !== 'owner') {
+      throw new Error('Only room owners can view banned users');
+    }
+
+    // For now, return empty array since we don't have banned_users table
+    // This can be implemented later with a proper banned_users table
+    return [];
+  } catch (error) {
+    console.error('Error fetching banned users:', error);
     throw error;
   }
 }
@@ -916,16 +984,17 @@ export async function deleteTask(taskId: string) {
 
     const taskData = task[0];
 
-    // Check if user is the creator or room admin/owner
+    // Check if user is the creator or room owner
     const userMembership = await sql`
       SELECT role FROM room_members 
       WHERE room_id = ${taskData.room_id} AND user_id = ${userId}
     `;
 
-    const isRoomAdmin = userMembership.length > 0 && ['owner', 'admin'].includes(userMembership[0].role);
+    const isRoomOwner = userMembership.length > 0 && userMembership[0].role === 'owner';
     const isCreator = taskData.created_by === userId;
 
-    if (!isCreator && !isRoomAdmin) {
+    // Owner can delete any task, members can only delete their own tasks
+    if (!isRoomOwner && !isCreator) {
       throw new Error('You do not have permission to delete this task');
     }
 
@@ -937,6 +1006,52 @@ export async function deleteTask(taskId: string) {
     return { success: true };
   } catch (error) {
     console.error('Error deleting task:', error);
+    throw error;
+  }
+}
+
+// Transfer room ownership
+export async function transferRoomOwnership(roomId: string, newOwnerUserId: string) {
+  try {
+    const userId = await getDbUserId();
+    if (!userId) throw new Error('Unauthorized');
+
+    // Check if current user is the owner
+    const currentUserMembership = await sql`
+      SELECT role FROM room_members 
+      WHERE room_id = ${roomId} AND user_id = ${userId}
+    `;
+
+    if (currentUserMembership.length === 0 || currentUserMembership[0].role !== 'owner') {
+      throw new Error('Only the owner can transfer ownership');
+    }
+
+    // Check if new owner is a member of the room
+    const newOwnerMembership = await sql`
+      SELECT role FROM room_members 
+      WHERE room_id = ${roomId} AND user_id = ${newOwnerUserId}
+    `;
+
+    if (newOwnerMembership.length === 0) {
+      throw new Error('New owner must be a member of the room');
+    }
+
+    // Transfer ownership: demote current owner to member and promote new owner
+    await sql`
+      UPDATE room_members 
+      SET role = 'member'
+      WHERE room_id = ${roomId} AND user_id = ${userId}
+    `;
+
+    await sql`
+      UPDATE room_members 
+      SET role = 'owner'
+      WHERE room_id = ${roomId} AND user_id = ${newOwnerUserId}
+    `;
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error transferring ownership:', error);
     throw error;
   }
 }
@@ -1707,4 +1822,5 @@ export async function getMonthlyTaskAnalytics() {
     throw error;
   }
 }
+
 

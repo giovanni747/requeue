@@ -15,6 +15,7 @@ interface SocketContextType {
   connected: boolean;
   onlineUsers: OnlineUser[];
   currentRoomUsers: OnlineUser[];
+  currentRoomId: string | null;
   joinRoom: (roomId: string, userName?: string) => void;
   leaveRoom: (roomId: string) => void;
   emitTaskCreated: (data: any) => void;
@@ -25,6 +26,7 @@ interface SocketContextType {
   emitNotification: (data: any) => void;
   emitUserFollowed: (data: any) => void;
   emitUserUnfollowed: (data: any) => void;
+  emitCursorMove: (data: { x: number; y: number; userName: string }) => void;
 }
 
 const SocketContext = createContext<SocketContextType>({
@@ -32,6 +34,7 @@ const SocketContext = createContext<SocketContextType>({
   connected: false,
   onlineUsers: [],
   currentRoomUsers: [],
+  currentRoomId: null,
   joinRoom: () => {},
   leaveRoom: () => {},
   emitTaskCreated: () => {},
@@ -42,6 +45,7 @@ const SocketContext = createContext<SocketContextType>({
   emitNotification: () => {},
   emitUserFollowed: () => {},
   emitUserUnfollowed: () => {},
+  emitCursorMove: () => {},
 });
 
 export const useSocket = () => {
@@ -61,6 +65,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [currentRoomUsers, setCurrentRoomUsers] = useState<OnlineUser[]>([]);
+  const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const { isSignedIn, userId } = useAuth();
   const { user } = useUser();
 
@@ -178,6 +183,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       };
       console.log(`🔌 Joining room with payload:`, payload);
       socket.emit('join-room', payload);
+      setCurrentRoomId(roomId);
       console.log(`🔌 Joined room: ${roomId}`);
     }
   }, [socket, connected, userId, user]);
@@ -188,6 +194,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       console.log(`🔌 Left room: ${roomId}`);
       // Clear current room users when leaving
       setCurrentRoomUsers([]);
+      setCurrentRoomId(null); // Clear current room ID
     }
   }, [socket, connected]);
 
@@ -247,11 +254,23 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     }
   }, [socket, connected]);
 
+  const emitCursorMove = useCallback((data: { x: number; y: number; userName: string }) => {
+    if (socket && connected && currentRoomId) {
+      socket.emit('cursor:move', {
+        roomId: currentRoomId,
+        x: data.x,
+        y: data.y,
+        userName: data.userName
+      });
+    }
+  }, [socket, connected, currentRoomId]);
+
   const value: SocketContextType = {
     socket,
     connected,
     onlineUsers,
     currentRoomUsers,
+    currentRoomId,
     joinRoom,
     leaveRoom,
     emitTaskCreated,
@@ -262,6 +281,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     emitNotification,
     emitUserFollowed,
     emitUserUnfollowed,
+    emitCursorMove,
   };
 
   return (

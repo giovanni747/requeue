@@ -213,7 +213,9 @@ export default function ProfilePage() {
                 <CardContent>
                   <div className="space-y-4">
                     <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg">
-                      <div className="w-2 h-2 bg-green-500 rounded-full" />
+                      <div className="size-2 bg-green-500 rounded-full ring-2 ring-zinc-900 relative">
+                        <div className="absolute inset-0 bg-green-500 rounded-full animate-slow-pulse"></div>
+                      </div>
                       <div>
                         <p className="text-sm font-medium">Completed task "Design new dashboard"</p>
                         <p className="text-xs text-muted-foreground">2 hours ago</p>

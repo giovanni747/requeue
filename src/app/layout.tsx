@@ -119,22 +119,22 @@ export default function RootLayout({
             toastOptions={{
               duration: 3000,
               style: {
-                background: "#1f2937",
-                color: "#f9fafb",
-                border: "1px solid #374151",
+                background: "#000000",
+                color: "#ffffff",
+                border: "1px solid #333333",
               },
               success: {
                 style: {
-                  background: "#1f2937",
-                  color: "#f9fafb",
-                  border: "1px solid #374151",
+                  background: "#000000",
+                  color: "#ffffff",
+                  border: "1px solid #333333",
                 },
               },
               error: {
                 style: {
-                  background: "#dc2626",
-                  color: "#f9fafb",
-                  border: "1px solid #b91c1c",
+                  background: "#000000",
+                  color: "#ffffff",
+                  border: "1px solid #dc2626",
                 },
               },
             }}

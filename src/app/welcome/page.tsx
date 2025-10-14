@@ -233,7 +233,7 @@ export default function WelcomePage() {
                           Create a new room and invite your team to start collaborating.
                         </DialogDescription>
                       </DialogHeader>
-                      <div className="grid gap-6 py-4">
+                      <div className="grid gap-6 py-6 px-6">
                         <div className="grid gap-3 mx-auto w-full">
                           <Label htmlFor="name-1" className="mt-2">Room Name</Label>
                           <Input 

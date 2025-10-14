@@ -24,6 +24,7 @@ import SuggestedUsers from '@/components/SuggestedUsers';
 import RecentActivity from '@/components/RecentActivity';
 import { AutosuggestInput } from '@/components/AutosuggestInput';
 import { HeroSection } from '@/components/hero-section';
+import RoomImageUpload from '@/components/RoomImageUpload';
 
 interface User {
   id: string;
@@ -45,6 +46,8 @@ export default function Home() {
   const [selectedInvitees, setSelectedInvitees] = useState<(User | { email: string; type: 'email' })[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHeavyUI, setShowHeavyUI] = useState(false);
+  const [roomImage, setRoomImage] = useState<string | null>(null);
+  const [roomImagePublicId, setRoomImagePublicId] = useState<string | null>(null);
 
   // Fetch user rooms from database
   useEffect(() => {
@@ -84,19 +87,26 @@ export default function Home() {
     return () => cancel(id);
   }, [isLoaded]);
 
+  const handleImageUpload = (url: string, publicId: string) => {
+    setRoomImage(url);
+    setRoomImagePublicId(publicId);
+  };
+
   const handleCreateRoom = async () => {
     if (roomName.trim()) {
       try {
-        const newRoom = await createRoom(roomName.trim());
+        const newRoom = await createRoom(roomName.trim(), roomImage || undefined, roomImagePublicId || undefined);
         const roomWithImage = {
           id: newRoom.id,
           name: newRoom.name,
-          img: newRoom.image_url || `https://images.unsplash.com/photo-157212036061${rooms.length + 1}-d971b9d7767c?q=80&w=500&auto=format`
+          img: roomImage || `https://images.unsplash.com/photo-157212036061${rooms.length + 1}-d971b9d7767c?q=80&w=500&auto=format`
         };
         setRooms([roomWithImage, ...rooms]);
         setRoomName("");
         setUsername("");
         setSelectedInvitees([]);
+        setRoomImage(null);
+        setRoomImagePublicId(null);
         
         // Send invitations to selected users
         if (selectedInvitees.length > 0) {
@@ -250,7 +260,7 @@ export default function Home() {
                           Create a new room and invite your team to start collaborating.
                         </DialogDescription>
                       </DialogHeader>
-                      <div className="grid gap-6 py-4">
+                      <div className="grid gap-6 py-6 px-6">
                         <div className="grid gap-3 mx-auto w-full">
                           <Label htmlFor="name-1" className="mt-2">Room Name</Label>
                           <Input 
@@ -261,6 +271,13 @@ export default function Home() {
                             onChange={(e) => setRoomName(e.target.value)}
                           />
                         </div>
+                        
+                        {/* Room Image Upload */}
+                        <RoomImageUpload
+                          onUploadComplete={handleImageUpload}
+                          currentImage={roomImage || undefined}
+                          currentImagePublicId={roomImagePublicId || undefined}
+                        />
                         <div className="grid gap-3 mx-auto w-full">
                           <Label htmlFor="invitees" className="mt-2">
                             Invite People (Optional)
