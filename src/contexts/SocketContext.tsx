@@ -10,12 +10,19 @@ interface OnlineUser {
   socketId: string;
 }
 
+interface TypingUser {
+  userId: string;
+  userName: string;
+  isTyping: boolean;
+}
+
 interface SocketContextType {
   socket: Socket | null;
   connected: boolean;
   onlineUsers: OnlineUser[];
   currentRoomUsers: OnlineUser[];
   currentRoomId: string | null;
+  typingUsers: TypingUser[];
   joinRoom: (roomId: string, userName?: string) => void;
   leaveRoom: (roomId: string) => void;
   emitTaskCreated: (data: any) => void;
@@ -27,6 +34,8 @@ interface SocketContextType {
   emitUserFollowed: (data: any) => void;
   emitUserUnfollowed: (data: any) => void;
   emitCursorMove: (data: { x: number; y: number; userName: string }) => void;
+  emitMessage: (data: any) => void;
+  emitTyping: (data: { roomId: string; isTyping: boolean }) => void;
 }
 
 const SocketContext = createContext<SocketContextType>({
@@ -35,6 +44,7 @@ const SocketContext = createContext<SocketContextType>({
   onlineUsers: [],
   currentRoomUsers: [],
   currentRoomId: null,
+  typingUsers: [],
   joinRoom: () => {},
   leaveRoom: () => {},
   emitTaskCreated: () => {},
@@ -46,6 +56,8 @@ const SocketContext = createContext<SocketContextType>({
   emitUserFollowed: () => {},
   emitUserUnfollowed: () => {},
   emitCursorMove: () => {},
+  emitMessage: () => {},
+  emitTyping: () => {},
 });
 
 export const useSocket = () => {
@@ -66,6 +78,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [currentRoomUsers, setCurrentRoomUsers] = useState<OnlineUser[]>([]);
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
+  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const { isSignedIn, userId } = useAuth();
   const { user } = useUser();
 
@@ -149,6 +162,37 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         setOnlineUsers(users);
       });
 
+      // Listen for typing events
+      newSocket.on('typing:start', (data: { userId: string; userName: string }) => {
+        setTypingUsers(prev => {
+          // Don't show current user typing
+          if (data.userId === userId) return prev;
+          // Add or update typing user
+          const exists = prev.find(u => u.userId === data.userId);
+          if (exists) {
+            return prev.map(u => u.userId === data.userId ? { ...u, isTyping: true } : u);
+          }
+          return [...prev, { userId: data.userId, userName: data.userName, isTyping: true }];
+        });
+      });
+
+      newSocket.on('typing:stop', (data: { userId: string; userName: string }) => {
+        setTypingUsers(prev => prev.filter(u => u.userId !== data.userId));
+      });
+
+      // Listen for mention notifications
+      newSocket.on('mention:received', (data: { 
+        messageId: string;
+        roomId: string;
+        senderId: string;
+        senderName: string;
+        text: string;
+      }) => {
+        console.log('🔔 Mention received:', data);
+        // You can show a toast or trigger a notification here
+        // The notification is already created in the database via server action
+      });
+
       setSocket(newSocket);
 
       // Ensure connection is attempted
@@ -165,11 +209,15 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         socket.off('user-joined');
         socket.off('user-left');
         socket.off('online-users');
+        socket.off('typing:start');
+        socket.off('typing:stop');
+        socket.off('mention:received');
         socket.close();
         setSocket(null);
         setConnected(false);
         setCurrentRoomUsers([]);
         setOnlineUsers([]);
+        setTypingUsers([]);
       }
     };
   }, [isSignedIn, userId, user]);
@@ -265,12 +313,34 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     }
   }, [socket, connected, currentRoomId]);
 
+  const emitMessage = useCallback((data: any) => {
+    if (socket && connected && currentRoomId) {
+      socket.emit('message:new', {
+        roomId: currentRoomId,
+        ...data
+      });
+      console.log('🔌 Emitted message:new', data);
+    }
+  }, [socket, connected, currentRoomId]);
+
+  const emitTyping = useCallback((data: { roomId: string; isTyping: boolean }) => {
+    if (socket && connected && currentRoomId) {
+      socket.emit(data.isTyping ? 'typing:start' : 'typing:stop', {
+        roomId: data.roomId,
+        userId,
+        userName: user?.fullName || user?.username || 'Anonymous'
+      });
+      console.log('🔌 Emitted typing event', data);
+    }
+  }, [socket, connected, currentRoomId, userId, user]);
+
   const value: SocketContextType = {
     socket,
     connected,
     onlineUsers,
     currentRoomUsers,
     currentRoomId,
+    typingUsers,
     joinRoom,
     leaveRoom,
     emitTaskCreated,
@@ -282,6 +352,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     emitUserFollowed,
     emitUserUnfollowed,
     emitCursorMove,
+    emitMessage,
+    emitTyping,
   };
 
   return (

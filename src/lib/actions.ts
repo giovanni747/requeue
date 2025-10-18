@@ -1546,7 +1546,8 @@ export async function getMyTasks() {
         u_assigned.name as assigned_name,
         u_assigned.image_url as assigned_avatar,
         u_creator.name as creator_name,
-        u_creator.image_url as creator_avatar
+        u_creator.image_url as creator_avatar,
+        u_creator.clerk_id as creator_clerk_id
       FROM tasks t
       INNER JOIN rooms r ON r.id = t.room_id
       LEFT JOIN users u_assigned ON u_assigned.id = t.assigned_to
@@ -1588,7 +1589,8 @@ export async function getMyTasks() {
       createdBy: {
         id: task.created_by,
         name: task.creator_name,
-        avatar: task.creator_avatar
+        avatar: task.creator_avatar,
+        clerkId: task.creator_clerk_id
       }
     }));
   } catch (error) {
@@ -1726,28 +1728,19 @@ export async function getMonthlyTaskAnalytics() {
     const startOfMonth = new Date(currentYear, currentMonth - 1, 1);
     const endOfMonth = new Date(currentYear, currentMonth, 0, 23, 59, 59);
 
-    // Get completed tasks this month (from both active tasks and history)
+    // Get completed tasks this month (from task_history only to avoid double counting)
     const completedThisMonth = await sql`
-      SELECT COUNT(*) as count FROM (
-        SELECT DISTINCT t.id FROM tasks t
-        WHERE t.assigned_to = ${userId} AND t.status = 'completed'
-        AND t.updated_at >= ${startOfMonth} AND t.updated_at <= ${endOfMonth}
-        UNION
-        SELECT DISTINCT th.id FROM task_history th
-        WHERE th.assigned_to = ${userId} AND th.status = 'completed'
-        AND th.completed_at >= ${startOfMonth} AND th.completed_at <= ${endOfMonth}
-      ) as combined
+      SELECT COUNT(DISTINCT th.id) as count 
+      FROM task_history th
+      WHERE th.assigned_to = ${userId} AND th.status = 'completed'
+      AND th.completed_at >= ${startOfMonth} AND th.completed_at <= ${endOfMonth}
     `;
 
-    // Get total completed tasks (from both active tasks and history)
+    // Get total completed tasks (from task_history only to avoid double counting)
     const totalCompleted = await sql`
-      SELECT COUNT(*) as count FROM (
-        SELECT DISTINCT t.id FROM tasks t
-        WHERE t.assigned_to = ${userId} AND t.status = 'completed'
-        UNION
-        SELECT DISTINCT th.id FROM task_history th
-        WHERE th.assigned_to = ${userId} AND th.status = 'completed'
-      ) as combined
+      SELECT COUNT(DISTINCT th.id) as count 
+      FROM task_history th
+      WHERE th.assigned_to = ${userId} AND th.status = 'completed'
     `;
 
     // Get total assigned tasks
@@ -1819,6 +1812,349 @@ export async function getMonthlyTaskAnalytics() {
     };
   } catch (error) {
     console.error('Error fetching monthly task analytics:', error);
+    throw error;
+  }
+}
+
+// Chat/Messaging Actions
+export async function sendMessage(
+  roomId: string, 
+  text?: string, 
+  imageUrl?: string, 
+  imagePublicId?: string,
+  mentionedUserIds?: string[]
+) {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    throw new Error('You must be logged in to send messages');
+  }
+
+  if (!text && !imageUrl) {
+    throw new Error('Message must contain text or an image');
+  }
+
+  try {
+    // Get the database user ID
+    const userResult = await sql`
+      SELECT id FROM users WHERE clerk_id = ${userId}
+    `;
+
+    if (!userResult || userResult.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const dbUserId = userResult[0].id;
+
+    // Check if user is a member of the room
+    const memberCheck = await sql`
+      SELECT id FROM room_members 
+      WHERE room_id = ${roomId} AND user_id = ${dbUserId}
+    `;
+
+    if (!memberCheck || memberCheck.length === 0) {
+      throw new Error('You must be a member of this room to send messages');
+    }
+
+    // Create the message with mentions
+    const result = await sql`
+      INSERT INTO messages (room_id, sender_id, text, image_url, image_public_id, mentioned_user_ids)
+      VALUES (
+        ${roomId}, 
+        ${dbUserId}, 
+        ${text || null}, 
+        ${imageUrl || null}, 
+        ${imagePublicId || null},
+        ${mentionedUserIds && mentionedUserIds.length > 0 ? mentionedUserIds : []}
+      )
+      RETURNING 
+        id,
+        room_id,
+        sender_id,
+        text,
+        image_url,
+        image_public_id,
+        mentioned_user_ids,
+        created_at,
+        updated_at
+    `;
+
+    const message = result[0];
+
+    // Create mention records and notifications for mentioned users
+    if (mentionedUserIds && mentionedUserIds.length > 0) {
+      for (const mentionedUserId of mentionedUserIds) {
+        // Create mention record
+        await sql`
+          INSERT INTO mentions (message_id, mentioned_user_id, read)
+          VALUES (${message.id}, ${mentionedUserId}, false)
+          ON CONFLICT (message_id, mentioned_user_id) DO NOTHING
+        `;
+
+        // Get room info for notification
+        const roomInfo = await sql`
+          SELECT title FROM rooms WHERE id = ${roomId}
+        `;
+
+        // Get sender info for notification
+        const senderInfo = await sql`
+          SELECT name FROM users WHERE id = ${dbUserId}
+        `;
+
+        // Clean the message text by removing mention markdown syntax
+        // Converts "@[walter white](uuid)hello?" to "hello?"
+        const cleanedText = text?.replace(/@\[([^\]]+)\]\([^)]+\)/g, '') || '';
+        
+        // Create notification
+        await sql`
+          INSERT INTO notifications (user_id, type, title, message, link, read, metadata)
+          VALUES (
+            ${mentionedUserId},
+            'mention',
+            ${`${senderInfo[0]?.name || 'Someone'} mentioned you`},
+            ${cleanedText.substring(0, 100) || 'in a message'},
+            ${`/room/${roomId}`},
+            false,
+            ${JSON.stringify({ 
+              roomId, 
+              messageId: message.id, 
+              senderId: dbUserId,
+              roomName: roomInfo[0]?.title || 'Unknown Room'
+            })}
+          )
+        `;
+      }
+    }
+
+    // Get sender info
+    const senderInfo = await sql`
+      SELECT id, name, email, image_url, clerk_id
+      FROM users
+      WHERE id = ${dbUserId}
+    `;
+
+    const sender = senderInfo[0];
+
+    return {
+      success: true,
+      message: {
+        id: message.id,
+        roomId: message.room_id,
+        senderId: message.sender_id,
+        text: message.text,
+        imageUrl: message.image_url,
+        imagePublicId: message.image_public_id,
+        mentionedUserIds: message.mentioned_user_ids || [],
+        createdAt: message.created_at,
+        updatedAt: message.updated_at,
+        sender: {
+          id: sender.id,
+          name: sender.name,
+          email: sender.email,
+          image: sender.image_url,
+          clerkId: sender.clerk_id
+        }
+      }
+    };
+  } catch (error: any) {
+    console.error('Error sending message:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to send message'
+    };
+  }
+}
+
+export async function getRoomMessages(roomId: string) {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    throw new Error('You must be logged in to view messages');
+  }
+
+  try {
+    // Get the database user ID
+    const userResult = await sql`
+      SELECT id FROM users WHERE clerk_id = ${userId}
+    `;
+
+    if (!userResult || userResult.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const dbUserId = userResult[0].id;
+
+    // Check if user is a member of the room
+    const memberCheck = await sql`
+      SELECT id FROM room_members 
+      WHERE room_id = ${roomId} AND user_id = ${dbUserId}
+    `;
+
+    if (!memberCheck || memberCheck.length === 0) {
+      throw new Error('You must be a member of this room to view messages');
+    }
+
+    // Get all messages for the room with sender information
+    const messages = await sql`
+      SELECT 
+        m.id,
+        m.room_id,
+        m.sender_id,
+        m.text,
+        m.image_url,
+        m.image_public_id,
+        m.mentioned_user_ids,
+        m.created_at,
+        m.updated_at,
+        u.id as sender_db_id,
+        u.name as sender_name,
+        u.email as sender_email,
+        u.image_url as sender_image,
+        u.clerk_id as sender_clerk_id
+      FROM messages m
+      JOIN users u ON m.sender_id = u.id
+      WHERE m.room_id = ${roomId}
+      ORDER BY m.created_at ASC
+    `;
+
+    return messages.map((msg: any) => ({
+      id: msg.id,
+      roomId: msg.room_id,
+      senderId: msg.sender_id,
+      text: msg.text,
+      imageUrl: msg.image_url,
+      imagePublicId: msg.image_public_id,
+      mentionedUserIds: msg.mentioned_user_ids || [],
+      createdAt: msg.created_at,
+      updatedAt: msg.updated_at,
+      sender: {
+        id: msg.sender_db_id,
+        name: msg.sender_name,
+        email: msg.sender_email,
+        image: msg.sender_image,
+        clerkId: msg.sender_clerk_id
+      }
+    }));
+  } catch (error: any) {
+    console.error('Error fetching messages:', error);
+    throw error;
+  }
+}
+
+// Get user notifications
+export async function getUserNotifications() {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    throw new Error('You must be logged in');
+  }
+
+  try {
+    const userResult = await sql`
+      SELECT id FROM users WHERE clerk_id = ${userId}
+    `;
+
+    if (!userResult || userResult.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const dbUserId = userResult[0].id;
+
+    const notifications = await sql`
+      SELECT 
+        n.id,
+        n.type,
+        n.title,
+        n.message,
+        n.link,
+        n.read,
+        n.created_at,
+        n.metadata,
+        u.id as sender_id,
+        u.name as sender_name,
+        u.email as sender_email,
+        u.image_url as sender_image,
+        u.clerk_id as sender_clerk_id
+      FROM notifications n
+      LEFT JOIN users u ON (n.metadata->>'senderId')::uuid = u.id
+      WHERE n.user_id = ${dbUserId}
+      ORDER BY n.created_at DESC
+      LIMIT 50
+    `;
+
+    return notifications.map((notif: any) => ({
+      id: notif.id,
+      type: notif.type,
+      title: notif.title,
+      message: notif.message,
+      link: notif.link,
+      read: notif.read,
+      createdAt: notif.created_at,
+      metadata: notif.metadata,
+      creator: {
+        id: notif.sender_id,
+        name: notif.sender_name,
+        email: notif.sender_email,
+        image: notif.sender_image,
+        clerkId: notif.sender_clerk_id
+      }
+    }));
+  } catch (error: any) {
+    console.error('Error fetching notifications:', error);
+    throw error;
+  }
+}
+
+// Mark notification as read
+export async function markNotificationAsRead(notificationId: string) {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    throw new Error('You must be logged in');
+  }
+
+  try {
+    await sql`
+      UPDATE notifications
+      SET read = true
+      WHERE id = ${notificationId}
+    `;
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error marking notification as read:', error);
+    throw error;
+  }
+}
+
+// Mark all notifications as read
+export async function markAllNotificationsAsRead() {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    throw new Error('You must be logged in');
+  }
+
+  try {
+    const userResult = await sql`
+      SELECT id FROM users WHERE clerk_id = ${userId}
+    `;
+
+    if (!userResult || userResult.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const dbUserId = userResult[0].id;
+
+    await sql`
+      UPDATE notifications
+      SET read = true
+      WHERE user_id = ${dbUserId} AND read = false
+    `;
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error marking all notifications as read:', error);
     throw error;
   }
 }

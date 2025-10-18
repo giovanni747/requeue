@@ -17,12 +17,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import {
   Table,
   TableBody,
   TableCell,
@@ -58,6 +52,7 @@ import {
 // Import the new component
 import { InviteModal } from '@/components/InviteModal';
 import RoomImageUpload from '@/components/RoomImageUpload';
+import RoomChat from '@/components/RoomChat';
 import { getRoomMembers, getRoomData, getRoomTasks, createTask, updateTaskPosition, assignTaskToUser, deleteTask, getRoomTaskStats, transferRoomOwnership, promoteMemberToOwner, banUserFromRoom, getBannedUsers, updateRoomImage } from '@/lib/actions';
 import { useSocket } from '@/contexts/SocketContext';
 import toast from 'react-hot-toast';
@@ -286,13 +281,6 @@ export default function RoomPage() {
     };
   }, [socket, connected, roomId, user?.id]);
 
-  // Mock recent activity
-  const mockActivity = [
-    { id: '1', action: 'joined the room', user: 'Alice Johnson', time: '2 min ago', type: 'join' },
-    { id: '2', action: 'shared a document', user: 'Bob Smith', time: '15 min ago', type: 'share' },
-    { id: '3', action: 'started a discussion', user: 'Carol Davis', time: '1 hour ago', type: 'message' },
-    { id: '4', action: 'updated room settings', user: 'Alice Johnson', time: '2 hours ago', type: 'settings' },
-  ];
 
   useEffect(() => {
     if (isLoaded && !user) {
@@ -1064,11 +1052,9 @@ export default function RoomPage() {
     }, []);
     
     return (
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <motion.div
-            ref={cardRef}
-            className="sticky-note cursor-pointer"
+      <motion.div
+        ref={cardRef}
+        className="sticky-note cursor-pointer"
             data-task-id={task.id}
             draggable
             style={{
@@ -1165,22 +1151,7 @@ export default function RoomPage() {
             </div>
           )}
         </div>
-          </motion.div>
-        </ContextMenuTrigger>
-        {currentUserRole === 'owner' && (
-          <ContextMenuContent className="w-48">
-            <ContextMenuItem 
-              onClick={() => {
-                setTaskToDelete(task.id);
-                setShowDeleteConfirm(true);
-              }}
-              className="text-red-600"
-            >
-              Delete Task
-            </ContextMenuItem>
-          </ContextMenuContent>
-        )}
-      </ContextMenu>
+      </motion.div>
     );
   }, (prevProps, nextProps) => {
     // Custom comparison to prevent unnecessary re-renders
@@ -1663,11 +1634,10 @@ export default function RoomPage() {
                         const isOnline = currentRoomUsers?.some(u => u.userId === member.clerkId) || false;
                         
                         return (
-                          <ContextMenu key={member.id}>
-                            <ContextMenuTrigger asChild>
-                              <motion.div
-                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors cursor-pointer"
-                                initial={{ opacity: 0, x: 20 }}
+                          <motion.div
+                            key={member.id}
+                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors cursor-pointer"
+                            initial={{ opacity: 0, x: 20 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 transition={{ delay: 0.8 + index * 0.1 }}
                               >
@@ -1689,18 +1659,6 @@ export default function RoomPage() {
                                   </Badge>
                                 </div>
                               </motion.div>
-                            </ContextMenuTrigger>
-                            {currentUserRole === 'owner' && member.role !== 'owner' && (
-                              <ContextMenuContent className="w-48">
-                                <ContextMenuItem 
-                                  onClick={() => handleBanUser(member.id, member.name)}
-                                  className="text-red-600"
-                                >
-                                  Ban {member.name}
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            )}
-                          </ContextMenu>
                         );
                       })
                     )}
@@ -1734,42 +1692,14 @@ export default function RoomPage() {
                 </Card>
               </motion.div>
 
-              {/* Recent Activity */}
+              {/* Room Chat */}
               <motion.div
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.9 }}
+                className="h-[600px]"
               >
-                <Card className="bg-card/80 backdrop-blur-lg border-border/50">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Activity className="h-5 w-5" />
-                      Recent Activity
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {mockActivity.map((activity, index) => (
-                      <motion.div
-                        key={activity.id}
-                        className="flex items-center gap-3 text-sm"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 1 + index * 0.1 }}
-                      >
-                        <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0"></div>
-                        <div className="flex-1 min-w-0">
-                          <p className="truncate">
-                            <span className="font-medium">{activity.user}</span> {activity.action}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1 text-muted-foreground flex-shrink-0">
-                          <Clock className="h-3 w-3" />
-                          <span className="text-xs">{activity.time}</span>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </CardContent>
-                </Card>
+                <RoomChat roomId={roomId} />
               </motion.div>
             </div>
           </div>

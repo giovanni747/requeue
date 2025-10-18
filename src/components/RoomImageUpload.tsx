@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Button } from '@/components/ui/button';
+import { useState } from 'react';
 import { Label } from '@/components/ui/label';
-import { Upload, X, Loader2, Image as ImageIcon } from 'lucide-react';
+import { ImageUploadField } from '@/components/ui/image-uploader';
+import toast from 'react-hot-toast';
 
 interface RoomImageUploadProps {
   onUploadComplete: (url: string, publicId: string) => void;
@@ -19,37 +19,36 @@ export default function RoomImageUpload({
   disabled = false,
 }: RoomImageUploadProps) {
   const [uploading, setUploading] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imageFile, setImageFile] = useState<File | string | null>(currentImage || null);
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleImageChange = async (file: File | string | null) => {
+    setImageFile(file);
+    
+    if (!file) {
+      // Image removed
+      onUploadComplete('', '');
+      return;
+    }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      setError('File size must be less than 5MB');
+    if (typeof file === 'string') {
+      // Already uploaded URL
       return;
     }
 
     // Validate file type
     if (!file.type.startsWith('image/')) {
-      setError('Please select an image file');
+      toast.error('Please select an image file');
+      setImageFile(currentImage || null);
       return;
     }
 
-    setError(null);
-    
-    // Create preview URL
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File size must be less than 5MB');
+      setImageFile(currentImage || null);
+      return;
+    }
 
-    // Start upload
-    handleUpload(file);
-  };
-
-  const handleUpload = async (file: File) => {
     setUploading(true);
 
     try {
@@ -66,106 +65,36 @@ export default function RoomImageUpload({
       const result = await response.json();
 
       if (result.success) {
+        setImageFile(result.secureUrl);
         onUploadComplete(result.secureUrl, result.publicId);
-        setError(null);
-        // Clear the file input
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
+        toast.success('Image uploaded successfully!');
       } else {
-        setError(result.error || 'Upload failed');
+        toast.error(result.error || 'Upload failed');
+        setImageFile(currentImage || null);
       }
     } catch (error) {
-      setError('Upload failed. Please try again.');
+      toast.error('Upload failed. Please try again.');
       console.error('Upload error:', error);
+      setImageFile(currentImage || null);
     } finally {
       setUploading(false);
     }
   };
 
-  const handleRemovePreview = () => {
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-    setError(null);
-  };
-
-  const handleButtonClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const displayImage = previewUrl || currentImage;
-
   return (
     <div className="space-y-3">
-      <Label className="text-sm font-medium">Room Image (Optional)</Label>
-      
-      {/* Current/Preview Image */}
-      {displayImage && (
-        <div className="relative w-32 h-32 rounded-full overflow-hidden border mx-auto">
-          <img
-            src={displayImage}
-            alt="Room preview"
-            className="w-full h-full object-cover"
-          />
-          {previewUrl && (
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              className="absolute top-1 right-1 w-6 h-6 p-0 rounded-full"
-              onClick={handleRemovePreview}
-              disabled={uploading}
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* Upload Button */}
-      <Button
-        type="button"
-        variant="outline"
-        onClick={handleButtonClick}
-        disabled={uploading || disabled}
-        className="w-full"
-      >
-        {uploading ? (
-          <>
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            Uploading...
-          </>
-        ) : (
-          <>
-            <Upload className="h-4 w-4 mr-2" />
-            {currentImage ? 'Change Image' : 'Upload Image'}
-          </>
-        )}
-      </Button>
-
-      {/* Hidden File Input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handleFileSelect}
-        className="hidden"
+      <ImageUploadField
+        value={imageFile}
+        onChange={handleImageChange}
+        disabled={disabled}
+        isLoading={uploading}
+        className="w-48 h-48 mx-auto"
+        aspectRatio={1}
+        maxSize={5 * 1024 * 1024}
+        defaultImage={currentImage}
       />
 
-      {/* Error Message */}
-      {error && (
-        <div className="text-sm text-red-500 bg-red-50 p-2 rounded">
-          {error}
-        </div>
-      )}
-
-      {/* Help Text */}
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-muted-foreground text-center">
         Max size: 5MB • Formats: JPG, PNG, WebP
       </p>
     </div>

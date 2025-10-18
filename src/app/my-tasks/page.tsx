@@ -6,6 +6,7 @@ import { getMyTasks, updateTaskStatus, updateTaskPriority } from "@/lib/actions"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TaskProgress } from "@/components/ui/task-progress";
 import { 
   CheckCircle, 
   Clock, 
@@ -38,6 +39,7 @@ interface Task {
     id: string;
     name: string;
     avatar: string | null;
+    clerkId: string;
   };
 }
 
@@ -74,6 +76,7 @@ export default function MyTasksPage() {
   const [selectedPriority, setSelectedPriority] = useState<string | null>(null);
   const [showPriorityDropdown, setShowPriorityDropdown] = useState(false);
   const [taskPriorityDropdowns, setTaskPriorityDropdowns] = useState<Record<string, boolean>>({});
+  const [taskProgress, setTaskProgress] = useState<Record<string, number>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -114,6 +117,17 @@ export default function MyTasksPage() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  const handleProgressChange = (taskId: string, progress: number) => {
+    setTaskProgress(prev => ({
+      ...prev,
+      [taskId]: progress
+    }));
+  };
+
+  const handleProgressComplete = async (taskId: string) => {
+    await handleStatusUpdate(taskId, 'completed');
+  };
 
   const handleStatusUpdate = async (taskId: string, newStatus: 'todo' | 'in_progress' | 'completed' | 'cancelled') => {
     try {
@@ -460,12 +474,30 @@ export default function MyTasksPage() {
                     )}
 
                     {/* Status */}
-                    <div className="flex items-center gap-2">
-                      <StatusIcon className={cn("w-4 h-4", statusInfo.color)} />
-                      <span className="text-sm text-foreground">
-                        {statusInfo.label}
-                      </span>
-                    </div>
+                    <Badge 
+                      variant="outline" 
+                      className={cn(
+                        "flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium w-fit",
+                        statusInfo.color === 'bg-gray-500' && "bg-gray-100 text-gray-700 border-gray-200",
+                        statusInfo.color === 'bg-blue-500' && "bg-blue-100 text-blue-700 border-blue-200",
+                        statusInfo.color === 'bg-green-500' && "bg-green-100 text-green-700 border-green-200",
+                        statusInfo.color === 'bg-red-500' && "bg-red-100 text-red-700 border-red-200"
+                      )}
+                    >
+                      <StatusIcon className="w-3 h-3" />
+                      {statusInfo.label}
+                    </Badge>
+
+                    {/* Progress Bar - Only show for in_progress tasks */}
+                    {task.status === 'in_progress' && (
+                      <TaskProgress
+                        taskId={task.id}
+                        currentProgress={taskProgress[task.id] || 0}
+                        onComplete={handleProgressComplete}
+                        isCompleted={false}
+                        className="py-2"
+                      />
+                    )}
 
                     {/* Action Buttons */}
                     <div className="flex gap-2 pt-2">

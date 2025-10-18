@@ -3,7 +3,7 @@ import { Server } from 'socket.io';
 import next from 'next';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
+const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT || '3000', 10);
 
 // Create Next.js app
@@ -17,7 +17,7 @@ app.prepare().then(() => {
   // Create Socket.io server with CORS configuration
   const io = new Server(server, {
     cors: {
-      origin: dev ? "http://localhost:3000" : false,
+      origin: dev ? "http://localhost:3000" : process.env.NEXT_PUBLIC_APP_URL,
       methods: ["GET", "POST"],
       credentials: true
     },
@@ -165,6 +165,61 @@ app.prepare().then(() => {
         userName,
         socketId: socket.id
       });
+    });
+
+    // Handle message events
+    socket.on("message:new", (data) => {
+      console.log("New message:", data);
+      const { roomId, message } = data;
+      
+      // Broadcast message to all users in the room (including sender)
+      io.to(roomId).emit("message:new", data);
+
+      // If message has mentions, send mention notifications to mentioned users
+      if (message && message.mentionedUserIds && message.mentionedUserIds.length > 0) {
+        console.log("Message has mentions:", message.mentionedUserIds);
+        console.log("Message sender:", message.sender);
+        
+        message.mentionedUserIds.forEach((mentionedUserId) => {
+          // Find socket(s) for the mentioned user
+          const userSockets = Array.from(onlineUsers.entries())
+            .filter(([_, user]) => user.userId === mentionedUserId)
+            .map(([socketId]) => socketId);
+
+          // Emit mention notification to mentioned user's sockets
+          userSockets.forEach((userSocketId) => {
+            const senderName = message.sender?.name || 'Unknown User';
+            console.log(`Sending mention notification to ${mentionedUserId} from ${senderName}`);
+            
+            // Clean the message text by removing mention markdown syntax
+            // Converts "@[walter white](uuid)hello?" to "hello?"
+            const cleanedText = message.text?.replace(/@\[([^\]]+)\]\([^)]+\)/g, '') || 'mentioned you';
+            
+            io.to(userSocketId).emit("mention:received", {
+              messageId: message.id,
+              roomId: roomId,
+              senderId: message.senderId,
+              senderName: senderName,
+              text: cleanedText.substring(0, 100)
+            });
+          });
+        });
+      }
+    });
+
+    // Handle typing events
+    socket.on("typing:start", (data) => {
+      console.log("User started typing:", data);
+      const { roomId, userId, userName } = data;
+      // Broadcast typing start to all users in the room except sender
+      socket.to(roomId).emit("typing:start", { userId, userName });
+    });
+
+    socket.on("typing:stop", (data) => {
+      console.log("User stopped typing:", data);
+      const { roomId, userId, userName } = data;
+      // Broadcast typing stop to all users in the room except sender
+      socket.to(roomId).emit("typing:stop", { userId, userName });
     });
 
     // Handle disconnection

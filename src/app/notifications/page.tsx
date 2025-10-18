@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { 
-  getNotifications, 
   markNotificationsAsRead, 
   acceptRoomInvitation, 
   declineRoomInvitation,
@@ -11,7 +10,10 @@ import {
   getFollowing,
   acceptFollowRequest,
   declineFollowRequest,
-  toggleFollow
+  toggleFollow,
+  getUserNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead
 } from "@/lib/actions";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,8 +43,8 @@ import toast from "react-hot-toast";
 import { formatDistanceToNow } from "date-fns";
 import { useSocket } from "@/contexts/SocketContext";
 
-type Notifications = Awaited<ReturnType<typeof getNotifications>>;
-type Notification = Notifications[number];
+type UserNotifications = Awaited<ReturnType<typeof getUserNotifications>>;
+type Notification = UserNotifications[number];
 type Followers = Awaited<ReturnType<typeof getFollowers>>;
 type Following = Awaited<ReturnType<typeof getFollowing>>;
 
@@ -60,6 +62,8 @@ const getNotificationIcon = (type: string) => {
       return <MessageCircle className="size-5 text-orange-500" />;
     case "LIKE":
       return <Heart className="size-5 text-red-500" />;
+    case "mention":
+      return <MessageCircle className="size-5 text-cyan-500" />;
     default:
       return <Bell className="size-5 text-gray-500" />;
   }
@@ -68,7 +72,8 @@ const getNotificationIcon = (type: string) => {
 const getNotificationMessage = (notification: Notification) => {
   switch (notification.type) {
     case "ROOM_INVITATION":
-      return `invited you to join "${notification.roomName}"`;
+      const roomName = notification.metadata?.roomName || 'a room';
+      return `invited you to join "${roomName}"`;
     case "FOLLOW":
       return "started following you";
     case "TASK_ASSIGNED":
@@ -79,6 +84,8 @@ const getNotificationMessage = (notification: Notification) => {
       return "commented on your post";
     case "LIKE":
       return "liked your post";
+    case "mention":
+      return "mentioned you";
     default:
       return "sent you a notification";
   }
@@ -98,6 +105,8 @@ const getNotificationColor = (type: string) => {
       return "bg-orange-50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-800";
     case "LIKE":
       return "bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800";
+    case "mention":
+      return "bg-cyan-50 border-cyan-200 dark:bg-cyan-950/20 dark:border-cyan-800";
     default:
       return "bg-gray-50 border-gray-200 dark:bg-gray-950/20 dark:border-gray-800";
   }
@@ -192,7 +201,7 @@ const FollowingSkeleton = () => (
 export default function NotificationsPage() {
   const router = useRouter();
   const { socket, connected, emitNotification, emitUserFollowed, emitUserUnfollowed } = useSocket();
-  const [notifications, setNotifications] = useState<Notifications>([]);
+  const [notifications, setNotifications] = useState<UserNotifications>([]);
   const [followers, setFollowers] = useState<Followers>([]);
   const [following, setFollowing] = useState<Following>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -213,7 +222,7 @@ export default function NotificationsPage() {
     const fetchData = async () => {
       try {
         const [notifData, followersData, followingData] = await Promise.all([
-          getNotifications(),
+          getUserNotifications(),
           getFollowers(),
           getFollowing()
         ]);
@@ -554,7 +563,7 @@ export default function NotificationsPage() {
                           <Avatar className="mt-1 ring-2 ring-background shadow-sm">
                             <AvatarImage src={notification.creator.image || "/avatar.png"} />
                             <AvatarFallback className="font-semibold">
-                              {(notification.creator.name || notification.creator.username || 'U')?.[0]?.toUpperCase() || "U"}
+                              {(notification.creator.name || notification.creator.email || 'U')?.[0]?.toUpperCase() || "U"}
                             </AvatarFallback>
                           </Avatar>
                           
@@ -564,21 +573,44 @@ export default function NotificationsPage() {
                                 {getNotificationIcon(notification.type)}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm leading-relaxed">
-                                  <span className="font-semibold text-foreground">
-                                    {notification.creator.name || notification.creator.username || 'Unknown User'}
-                                  </span>{" "}
-                                  <span className="text-muted-foreground">
-                                    {getNotificationMessage(notification)}
-                                  </span>
-                                </p>
+                                {/* For mention notifications, use title and message from database */}
+                                {notification.type === "mention" ? (
+                                  <>
+                                    <p className="text-sm leading-relaxed">
+                                      <span className="text-foreground">
+                                        {notification.title || `${notification.creator?.name || 'Someone'} mentioned you`}
+                                      </span>
+                                    </p>
+                                    {notification.message && (
+                                      <div className="mt-2 p-3 bg-muted/30 rounded-lg border">
+                                        <div className="flex items-start gap-2">
+                                          <MessageCircle className="h-4 w-4 text-cyan-500 mt-0.5 flex-shrink-0" />
+                                          <div className="flex-1">
+                                            <p className="text-sm text-muted-foreground line-clamp-2">
+                                              "{notification.message}"
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <p className="text-sm leading-relaxed">
+                                    <span className="font-semibold text-foreground">
+                                      {notification.creator?.name || notification.creator?.email?.split('@')[0] || 'Unknown User'}
+                                    </span>{" "}
+                                    <span className="text-muted-foreground">
+                                      {getNotificationMessage(notification)}
+                                    </span>
+                                  </p>
+                                )}
                                 
                                 {/* Rich content for different notification types */}
-                                {notification.type === "ROOM_INVITATION" && notification.roomName && (
+                                {notification.type === "ROOM_INVITATION" && notification.metadata?.roomName && (
                                   <div className="mt-2 p-3 bg-muted/30 rounded-lg border">
                                     <div className="flex items-center gap-2">
                                       <Users className="h-4 w-4 text-blue-500" />
-                                      <span className="font-medium text-sm">{notification.roomName}</span>
+                                      <span className="font-medium text-sm">{notification.metadata.roomName}</span>
                                     </div>
                                   </div>
                                 )}
@@ -587,18 +619,18 @@ export default function NotificationsPage() {
 
                             {/* Action buttons for room invitations */}
                             {notification.type === "ROOM_INVITATION" && 
-                             (notification.invitationStatus !== "accepted" && notification.invitationStatus !== "declined") && (
+                             (notification.metadata?.invitationStatus !== "accepted" && notification.metadata?.invitationStatus !== "declined") && (
                               <div className="flex gap-2 mt-3">
                                 <Button
                                   size="sm"
                                   onClick={() => handleAcceptInvitation(
-                                    notification.invitationId!,
+                                    notification.metadata?.invitationId!,
                                     notification.id
                                   )}
-                                  disabled={processingInvitationAction?.id === notification.invitationId}
+                                  disabled={processingInvitationAction?.id === notification.metadata?.invitationId}
                                   className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
                                 >
-                                  {processingInvitationAction?.id === notification.invitationId && processingInvitationAction?.action === 'accept' ? (
+                                  {processingInvitationAction?.id === notification.metadata?.invitationId && processingInvitationAction?.action === 'accept' ? (
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                   ) : (
                                     <>
@@ -611,13 +643,13 @@ export default function NotificationsPage() {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleDeclineInvitation(
-                                    notification.invitationId!,
+                                    notification.metadata?.invitationId!,
                                     notification.id
                                   )}
-                                  disabled={processingInvitationAction?.id === notification.invitationId}
+                                  disabled={processingInvitationAction?.id === notification.metadata?.invitationId}
                                   className="hover:bg-destructive hover:text-destructive-foreground"
                                 >
-                                  {processingInvitationAction?.id === notification.invitationId && processingInvitationAction?.action === 'decline' ? (
+                                  {processingInvitationAction?.id === notification.metadata?.invitationId && processingInvitationAction?.action === 'decline' ? (
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                   ) : (
                                     <>
@@ -682,14 +714,14 @@ export default function NotificationsPage() {
                             )}
 
                             {/* Status badges */}
-                            {notification.invitationStatus === "accepted" && (
+                            {notification.metadata?.invitationStatus === "accepted" && (
                               <Badge variant="default" className="bg-green-600 text-white">
                                 <Check className="h-3 w-3 mr-1" />
                                 Accepted
                               </Badge>
                             )}
 
-                            {notification.invitationStatus === "declined" && (
+                            {notification.metadata?.invitationStatus === "declined" && (
                               <Badge variant="secondary" className="bg-gray-100 text-gray-700">
                                 <X className="h-3 w-3 mr-1" />
                                 Declined

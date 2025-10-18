@@ -44,6 +44,16 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --animate-shine: shine var(--duration) infinite linear;
+  --animate-skeleton-loading: skeletonLoading 8s infinite ease-in-out;
+  --color-accents-2: var(----accents-2);
+  --color-accents-1: var(----accents-1);
+  --color-context-card-border: var(--context-card-border);
+  --color-blue-700: var(--ds-blue-700);
+  --color-red-700: var(--ds-red-700);
+  --color-amber-700: var(--ds-amber-700);
+  --color-gray-200: var(--ds-gray-200);
+  --color-gray-700: var(--ds-gray-700);
+  --color-gray-1000: var(--ds-gray-1000);
   @keyframes shine {
   0% {
     background-position: 0% 0%;
@@ -90,6 +100,21 @@
   --sidebar-accent-foreground: oklch(0.1 0 0);
   --sidebar-border: oklch(0.9 0 0);
   --sidebar-ring: oklch(0.6 0 0);
+  --accents-1: #fafafa;
+  --accents-2: #eaeaea;
+  --context-card-border: hsla(0, 0%, 92%, 1);
+  --ds-blue-700: oklch(57.61% 0.2508 258.23);
+  --ds-red-700: oklch(62.56% 0.2524 23.03);
+  --ds-amber-700: oklch(81.87% 0.1969 76.46);
+  --ds-gray-200: hsla(0, 0%, 92%, 1);
+  --ds-gray-700: hsla(0, 0%, 56%, 1);
+  --ds-gray-1000: hsla(0, 0%, 9%, 1);
+  --ds-progress-color: var(--ds-gray-1000);
+  --geist-foreground: #000;
+  --geist-error: #ee0000;
+  --geist-warning: #f5a623;
+  --geist-highlight-pink: #ff0080;
+  --geist-success: #0070f3;
 }
 
 .dark {
@@ -124,6 +149,17 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.439 0 0);
+  --accents-2: #333333;
+  --accents-1: #111111;
+  --context-card-border: hsla(0, 0%, 18%, 1);
+  --ds-blue-700: oklch(57.61% 0.2321 258.23);
+  --ds-red-700: oklch(62.56% 0.2234 23.03);
+  --ds-amber-700: oklch(81.87% 0.1969 76.46);
+  --ds-gray-200: hsla(0, 0%, 12%, 1);
+  --ds-gray-700: hsla(0, 0%, 56%, 1);
+  --ds-gray-1000: hsla(0, 0%, 93%, 1);
+  --geist-foreground: #fff;
+  --geist-error: #ff0000;
 }
 
 @layer base {
@@ -135,6 +171,13 @@
     /* stylelint-disable-next-line at-rule-no-unknown */
     @apply bg-background text-foreground;
   }
+}
+
+/* Word breaking utility for chat messages */
+.word-break {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .shiny-text {
@@ -201,6 +244,24 @@
 
 .animate-spin-slow {
   animation: spin 3s linear infinite;
+}
+
+@keyframes skeletonLoading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.bg-skeleton-gradient {
+  background: linear-gradient(
+    90deg,
+    var(--accents-1) 0%,
+    var(--accents-2) 50%,
+    var(--accents-1) 100%
+  );
 }
 
 /* ChromaGrid Custom Styles */

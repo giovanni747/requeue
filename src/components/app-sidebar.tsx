@@ -6,7 +6,6 @@ import {
   MessageSquare,
   Settings,
   Plus,
-  Hash,
   Bell,
   User,
   CheckSquare,
@@ -16,7 +15,6 @@ import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import SocketStatus from "@/components/SocketStatus"
 
 // App-specific menu items
 const items = [
@@ -42,8 +40,12 @@ export function AppSidebar() {
     <div className="fixed left-3 top-3 bottom-3 w-16 z-50 rounded-3xl bg-white/5 backdrop-blur-xl border border-white/10 shadow-lg" suppressHydrationWarning>
       {/* Logo */}
       <div className="flex items-center justify-center h-16 border-b border-white/10">
-        <Link href="/" className="w-8 h-8 bg-gradient-to-tr from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
-          <Hash className="w-5 h-5 text-white" />
+        <Link href="/" className="w-8 h-8 rounded-xl flex items-center justify-center overflow-hidden">
+          <img 
+            src="/logo.png" 
+            alt="Logo" 
+            className="w-full h-full object-contain"
+          />
         </Link>
       </div>
 
@@ -85,10 +87,6 @@ export function AppSidebar() {
         </div>
       )}
 
-      {/* Socket Status */}
-      <div className="absolute bottom-16 left-1/2 -translate-x-1/2">
-        <SocketStatus />
-      </div>
 
       {/* User profile at bottom */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
