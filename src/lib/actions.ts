@@ -1476,6 +1476,32 @@ export async function declineRoomInvitation(invitationId: string) {
     const userId = await getDbUserId();
     if (!userId) throw new Error('Unauthorized');
 
+    // First check if invitation exists and get its current status
+    const invitationCheck = await sql`
+      SELECT id, status, invited_user_id
+      FROM room_invitations
+      WHERE id = ${invitationId}
+    `;
+
+    if (invitationCheck.length === 0) {
+      console.log(`Invitation ${invitationId} not found in database`);
+      throw new Error('Invitation not found');
+    }
+
+    const invitation = invitationCheck[0];
+    
+    // Check if invitation belongs to current user
+    if (invitation.invited_user_id !== userId) {
+      console.log(`Invitation ${invitationId} does not belong to user ${userId}`);
+      throw new Error('Invitation not found');
+    }
+
+    // Check if invitation is already processed
+    if (invitation.status !== 'pending') {
+      console.log(`Invitation ${invitationId} already processed with status: ${invitation.status}`);
+      return { success: true, message: 'Invitation already processed' };
+    }
+
     // Update invitation status
     const result = await sql`
       UPDATE room_invitations
@@ -1485,7 +1511,7 @@ export async function declineRoomInvitation(invitationId: string) {
     `;
 
     if (result.length === 0) {
-      throw new Error('Invitation not found or already processed');
+      throw new Error('Failed to update invitation status');
     }
 
     return { success: true };

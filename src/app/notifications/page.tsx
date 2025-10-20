@@ -347,7 +347,7 @@ export default function NotificationsPage() {
     try {
       const result = await declineRoomInvitation(invitationId);
       if (result.success) {
-        toast.success("Invitation declined");
+        toast.success(result.message || "Invitation declined");
         // Update notification status locally
         setNotifications(prev => 
           prev.map(n => 
@@ -357,9 +357,26 @@ export default function NotificationsPage() {
           )
         );
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error declining invitation:", error);
-      toast.error("Failed to decline invitation");
+      // Handle specific error cases
+      if (error.message?.includes('already processed')) {
+        toast.success("Invitation already processed");
+        // Update notification status locally
+        setNotifications(prev => 
+          prev.map(n => 
+            n.id === notificationId 
+              ? { ...n, invitationStatus: 'declined' } 
+              : n
+          )
+        );
+      } else if (error.message?.includes('not found')) {
+        toast.error("Invitation not found - it may have been removed");
+        // Remove notification from local state
+        setNotifications(prev => prev.filter(n => n.id !== notificationId));
+      } else {
+        toast.error("Failed to decline invitation");
+      }
     } finally {
       setProcessingInvitationAction(null);
     }
