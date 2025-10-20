@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { AnimatedGroup } from '@/components/ui/hero_anima/animated-group'
 import { cn } from '@/lib/utils'
 import ShinyText from './ui/ShinyText'
-import Link from 'next/link'
 
 const transitionVariants = {
     item: {
