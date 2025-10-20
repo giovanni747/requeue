@@ -263,6 +263,16 @@ app.prepare().then(() => {
 
   // Handle Next.js requests
   server.on('request', (req, res) => {
+    // Handle HEAD requests for uptime monitoring
+    if (req.method === 'HEAD') {
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Content-Length': '0'
+      });
+      res.end();
+      return;
+    }
+    
     handle(req, res);
   });
 
