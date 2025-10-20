@@ -2115,7 +2115,10 @@ export async function getUserNotifications() {
         u.image_url as sender_image,
         u.clerk_id as sender_clerk_id
       FROM notifications n
-      LEFT JOIN users u ON (n.metadata->>'senderId')::uuid = u.id
+      LEFT JOIN users u ON COALESCE(
+        (n.metadata->>'senderId')::uuid,
+        (n.metadata->>'inviterId')::uuid
+      ) = u.id
       WHERE n.user_id = ${dbUserId}
       ORDER BY n.created_at DESC
       LIMIT 50
