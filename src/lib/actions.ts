@@ -444,13 +444,52 @@ export async function inviteUsersToRoom(userIds: string[], roomId: string) {
       throw new Error('You do not have permission to invite users to this room');
     }
 
+    // Get room info for notifications
+    const roomInfo = await sql`
+      SELECT title FROM rooms WHERE id = ${roomId}
+    `;
+    const roomName = roomInfo[0]?.title || 'Unknown Room';
+
+    // Get inviter info for notifications
+    const inviterInfo = await sql`
+      SELECT name FROM users WHERE id = ${userId}
+    `;
+    const inviterName = inviterInfo[0]?.name || 'Someone';
+
     // Create invitations for each user instead of directly adding them
     for (const targetUserId of userIds) {
-      await sql`
+      // Insert room invitation
+      const invitationResult = await sql`
         INSERT INTO room_invitations (room_id, inviter_id, invited_user_id, status)
         VALUES (${roomId}, ${userId}, ${targetUserId}, 'pending')
         ON CONFLICT (room_id, invited_user_id) DO NOTHING
+        RETURNING id
       `;
+
+      // Only create notification if invitation was actually created (not duplicate)
+      if (invitationResult.length > 0) {
+        const invitationId = invitationResult[0].id;
+
+        // Create notification for the invited user
+        await sql`
+          INSERT INTO notifications (user_id, type, title, message, link, read, metadata)
+          VALUES (
+            ${targetUserId},
+            'ROOM_INVITATION',
+            ${`${inviterName} invited you to join "${roomName}"`},
+            ${`You've been invited to join the room "${roomName}". Click to accept or decline.`},
+            ${`/room/${roomId}?invite=true`},
+            false,
+            ${JSON.stringify({ 
+              roomId, 
+              invitationId,
+              inviterId: userId,
+              roomName,
+              inviterName
+            })}
+          )
+        `;
+      }
     }
 
     return { success: true, message: `Successfully invited ${userIds.length} users` };
