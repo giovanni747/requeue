@@ -1,6 +1,6 @@
 "use client";
 
-import { ClerkLoaded, ClerkLoading, useUser } from '@clerk/nextjs';
+import { ClerkLoaded, ClerkLoading, useUser, SignInButton, SignUpButton } from '@clerk/nextjs';
 import { Particles } from "@/components/magicui/particles";
 import Stack from "@/components/Stack";
 import {

@@ -26,8 +26,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Requeue - Dark Modern Next.js App",
-  description: "A modern Next.js application with shadcn/ui components, built for the dark.",
+  title: "Requeue",
+  description: "Collaborative task management made simple.",
+  icons: {
+    icon: "/logo.png",
+    shortcut: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({
@@ -36,7 +41,24 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      appearance={{
+        baseTheme: undefined,
+        elements: {
+          formButtonPrimary: 'bg-blue-600 hover:bg-blue-700 text-white',
+          card: 'shadow-lg border-0',
+          headerTitle: 'hidden',
+          headerSubtitle: 'hidden',
+          socialButtonsBlockButton: 'border-gray-300 hover:bg-gray-50',
+          formFieldInput: 'border-gray-300 focus:border-blue-500 focus:ring-blue-500',
+          footerActionLink: 'text-blue-600 hover:text-blue-700',
+        },
+        layout: {
+          socialButtonsPlacement: 'bottom',
+          socialButtonsVariant: 'blockButton',
+        },
+      }}
+    >
       <html lang="en" className="dark" suppressHydrationWarning>
         <head>
           <link rel="preconnect" href="https://api.clerk.com" />

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { AnimatedGroup } from '@/components/ui/hero_anima/animated-group'
 import { cn } from '@/lib/utils'
 import ShinyText from './ui/ShinyText'
-import { SignInButton } from '@clerk/nextjs'
+import Link from 'next/link'
 
 const transitionVariants = {
     item: {
@@ -105,7 +105,7 @@ export function HeroSection() {
                                         ...transitionVariants,
                                     }}
                                     className="mt-12 flex flex-col items-center justify-center gap-2 md:flex-row">
-                                    <SignInButton mode="modal">
+                                    <Link href="/sign-in">
                                         <button className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-black/5 transition-all duration-300 dark:border-t-white/5 dark:shadow-zinc-950 cursor-pointer">
                                             <span className="text-foreground text-sm">Get Started</span>
                                             <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
@@ -121,7 +121,7 @@ export function HeroSection() {
                                                 </div>
                                             </div>
                                         </button>
-                                    </SignInButton>
+                                    </Link>
                                 </AnimatedGroup>
                             </div>
                         </div>
