@@ -1,23 +1,20 @@
 import { SignUp } from '@clerk/nextjs'
-import { Footer } from '@/components/footer'
-import { Hexagon, Github, Linkedin } from 'lucide-react'
 
 export default function Page() {
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Main Content */}
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <img 
-              src="/logo.png" 
-              alt="Requeue Logo" 
-              className="h-12 w-auto mx-auto mb-4"
-            />
-            <h1 className="text-2xl font-bold text-gray-900">Create your account</h1>
-            <p className="text-gray-600 mt-2">Join Requeue and start collaborating</p>
-          </div>
-          
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
+      <div className="w-full max-w-md mx-auto">
+        <div className="text-center mb-8">
+          <img 
+            src="/logo.png" 
+            alt="Requeue Logo" 
+            className="h-12 w-auto mx-auto mb-4"
+          />
+          <h1 className="text-2xl font-bold text-gray-900">Create your account</h1>
+          <p className="text-gray-600 mt-2">Join Requeue and start collaborating</p>
+        </div>
+        
+        <div className="flex justify-center">
           <SignUp 
             appearance={{
               elements: {
@@ -38,38 +35,6 @@ export default function Page() {
           />
         </div>
       </div>
-
-      {/* Footer */}
-      <Footer
-        logo={<Hexagon className="h-10 w-10" />}
-        brandName="Re:queue"
-        socialLinks={[
-          {
-            icon: <Linkedin className="h-5 w-5" />,
-            href: "https://www.linkedin.com/in/giovanni-san/",
-            label: "LinkedIn",
-          },
-          {
-            icon: <Github className="h-5 w-5" />,
-            href: "https://github.com/giovanni747",
-            label: "GitHub",
-          },
-        ]}
-        mainLinks={[
-          { href: "/products", label: "Products" },
-          { href: "/about", label: "About" },
-          { href: "/blog", label: "Blog" },
-          { href: "/contact", label: "Contact" },
-        ]}
-        legalLinks={[
-          { href: "/privacy", label: "Privacy" },
-          { href: "/terms", label: "Terms" },
-        ]}
-        copyright={{
-          text: "© 2024 Requeue",
-          license: "All rights reserved",
-        }}
-      />
     </div>
   )
 }
